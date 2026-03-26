@@ -1,0 +1,63 @@
+{
+  "name": "notebooklm-mcp-ultimate",
+  "version": "2.2.1",
+  "description": "Ultimate NotebookLM MCP with 44 tools: Q&A, content generation, audio studio, source management, and research",
+  "type": "module",
+  "bin": {
+    "notebooklm-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "postbuild": "chmod +x dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"No tests yet\" && exit 0",
+    "prepare": "npm run build",
+    "discover-rpc": "tsx scripts/discover-rpc-ids.ts"
+  },
+  "keywords": [
+    "mcp",
+    "notebooklm",
+    "gemini",
+    "ai",
+    "claude",
+    "ultimate",
+    "content-generation",
+    "audio-studio"
+  ],
+  "author": "kabuto-png (fork of notebooklm-mcp by Gérôme Dexheimer)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kabuto-png/notebooklm-mcp-ultimate.git"
+  },
+  "homepage": "https://github.com/kabuto-png/notebooklm-mcp-ultimate#readme",
+  "bugs": {
+    "url": "https://github.com/kabuto-png/notebooklm-mcp-ultimate/issues"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "dotenv": "^16.4.0",
+    "env-paths": "^3.0.0",
+    "globby": "^14.1.0",
+    "patchright": "^1.48.2",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^20.11.0",
+    "eslint": "^10.1.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.57.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

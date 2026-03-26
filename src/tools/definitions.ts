@@ -1,0 +1,43 @@
+/**
+ * MCP Tool Definitions
+ *
+ * Aggregates tool definitions from sub-modules.
+ */
+
+import { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { NotebookLibrary } from "../library/notebook-library.js";
+import {
+  askQuestionTool,
+  buildAskQuestionDescription,
+} from "./definitions/ask-question.js";
+import { notebookManagementTools } from "./definitions/notebook-management.js";
+import { sessionManagementTools } from "./definitions/session-management.js";
+import { systemTools } from "./definitions/system.js";
+import { contentGenerationTools } from "./definitions/content-generation.js";
+import { studioTools } from "./definitions/studio.js";
+import { sourceManagementTools } from "./definitions/source-management.js";
+import { researchTools } from "./definitions/research.js";
+import { notebookCRUDTools } from "./definitions/notebook-crud.js";
+
+/**
+ * Build Tool Definitions with NotebookLibrary context
+ */
+export function buildToolDefinitions(library: NotebookLibrary): Tool[] {
+  // Update the description for ask_question based on the library state
+  const dynamicAskQuestionTool = {
+    ...askQuestionTool,
+    description: buildAskQuestionDescription(library),
+  };
+
+  return [
+    dynamicAskQuestionTool,
+    ...notebookManagementTools,
+    ...notebookCRUDTools,
+    ...sessionManagementTools,
+    ...systemTools,
+    ...contentGenerationTools,
+    ...studioTools,
+    ...sourceManagementTools,
+    ...researchTools,
+  ];
+}
