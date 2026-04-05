@@ -210,7 +210,32 @@ export function createSourceHandlers(deps: SourceHandlerDependencies) {
             await sendProgress(`🎥 Adding YouTube source: ${args.youtube_url}`);
         }
 
+        // Try API first
         const result = await sourceOps.addYouTubeSource(notebookId, args.youtube_url);
+
+        // Fallback to browser if API fails and sessionManager available
+        if (!result.success && sessionManager) {
+            log.warning('⚠️  API failed, falling back to browser automation...');
+            if (sendProgress) {
+                await sendProgress('🔄 API failed, trying browser automation...');
+            }
+
+            try {
+                const notebookUrl = buildNotebookUrl(notebookId);
+                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+                const browserSuccess = await session.addYouTubeSourceViaUI(args.youtube_url);
+
+                if (browserSuccess) {
+                    log.success('✅ YouTube source added via browser automation');
+                    if (sendProgress) {
+                        await sendProgress('✅ YouTube source added via browser');
+                    }
+                    return { success: true, notebookId, method: 'browser' };
+                }
+            } catch (browserError) {
+                log.error(`❌ Browser fallback failed: ${browserError}`);
+            }
+        }
 
         if (result.success && sendProgress) {
             await sendProgress('✅ YouTube source added successfully');

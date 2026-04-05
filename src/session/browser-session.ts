@@ -896,6 +896,135 @@ export class BrowserSession {
   }
 
   /**
+   * Add a file source to the notebook via browser UI
+   *
+   * @param filePath - Local file path to upload
+   * @param sendProgress - Optional progress callback
+   * @returns true if source was added successfully
+   */
+  async addFileSourceViaUI(
+    filePath: string,
+    sendProgress?: ProgressCallback
+  ): Promise<boolean> {
+    if (!this.page || !this.initialized) {
+      throw new Error("Session not initialized");
+    }
+
+    log.info(`📁 [${this.sessionId}] Adding file source via UI: "${filePath}"`);
+
+    try {
+      const page = this.page;
+      await sendProgress?.("Opening source panel...", 1, 4);
+
+      // Click add source button
+      const addBtn = page.locator('button[aria-label*="Add source"], button[aria-label*="add source"]').first();
+      await addBtn.click({ timeout: 5000 });
+      await randomDelay(1000, 1500);
+
+      await sendProgress?.("Selecting file upload option...", 2, 4);
+
+      // Select file upload option
+      const fileOptionSelectors = [
+        'button:has-text("Upload")',
+        'button:has-text("File")',
+        '[role="menuitem"]:has-text("Upload")',
+        '[role="menuitem"]:has-text("File")',
+      ];
+
+      let selected = false;
+      for (const sel of fileOptionSelectors) {
+        try {
+          const opt = page.locator(sel).first();
+          if (await opt.isVisible({ timeout: 2000 })) {
+            await opt.click();
+            log.info(`  ✅ Selected file option: ${sel}`);
+            selected = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!selected) {
+        throw new Error("Could not find file upload option");
+      }
+
+      await randomDelay(1500, 2000);
+      await sendProgress?.("Selecting file...", 3, 4);
+
+      // Look for the file input or a button that triggers file chooser
+      // NotebookLM may show a drag-drop area with a "browse" link or hidden file input
+      const fileInputSelectors = [
+        'input[type="file"]',
+        '.cdk-overlay-pane input[type="file"]',
+        '[role="dialog"] input[type="file"]',
+      ];
+
+      let fileInput = null;
+      for (const sel of fileInputSelectors) {
+        try {
+          const input = page.locator(sel).first();
+          // File inputs are often hidden, so just check if it exists
+          if (await input.count() > 0) {
+            fileInput = input;
+            log.info(`  ✅ Found file input: ${sel}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (fileInput) {
+        // Direct file input - use setInputFiles
+        await fileInput.setInputFiles(filePath);
+        log.info(`  ✅ File set via input: ${filePath}`);
+      } else {
+        // Try clicking a browse/choose button with file chooser
+        const browseSelectors = [
+          'button:has-text("browse")',
+          'button:has-text("Browse")',
+          'button:has-text("Choose")',
+          'a:has-text("browse")',
+          '.cdk-overlay-pane button',
+        ];
+
+        let clicked = false;
+        for (const sel of browseSelectors) {
+          try {
+            const [fileChooser] = await Promise.all([
+              page.waitForEvent('filechooser', { timeout: 5000 }),
+              page.locator(sel).first().click({ timeout: 2000 })
+            ]);
+            await fileChooser.setFiles(filePath);
+            log.info(`  ✅ File selected via chooser: ${filePath}`);
+            clicked = true;
+            break;
+          } catch {
+            continue;
+          }
+        }
+
+        if (!clicked) {
+          throw new Error("Could not find file input or browse button");
+        }
+      }
+
+      await sendProgress?.("Processing upload...", 4, 4);
+      await randomDelay(3000, 5000); // File upload takes time
+
+      this.updateActivity();
+      log.success(`✅ [${this.sessionId}] File source added via UI: "${filePath}"`);
+      return true;
+
+    } catch (error) {
+      log.error(`❌ [${this.sessionId}] Failed to add file source via UI: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
    * Add a URL source to the notebook via browser UI
    *
    * @param url - URL to add as source
@@ -945,19 +1074,58 @@ export class BrowserSession {
         }
       }
 
-      await randomDelay(1000, 1500);
+      await randomDelay(1500, 2000);
       await sendProgress?.("Entering URL...", 3, 4);
 
-      // Fill URL input
-      const urlInput = page.locator('input[type="url"], input[placeholder*="URL"], input[placeholder*="url"], input[placeholder*="http"]').first();
-      await urlInput.fill(url, { timeout: 5000 });
+      // Fill URL textarea - NotebookLM uses textarea with "Paste any links" placeholder
+      const urlTextareaSelectors = [
+        'textarea[placeholder*="Paste any links"]',
+        'textarea[placeholder*="Paste"]',
+        '.cdk-overlay-pane textarea',
+        '[role="dialog"] textarea',
+      ];
+
+      let filled = false;
+      for (const sel of urlTextareaSelectors) {
+        try {
+          const textarea = page.locator(sel).first();
+          if (await textarea.isVisible({ timeout: 1500 })) {
+            await textarea.fill(url);
+            log.info(`  ✅ Filled URL: ${sel}`);
+            filled = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!filled) {
+        throw new Error("Could not find URL textarea");
+      }
 
       await randomDelay(500, 1000);
       await sendProgress?.("Submitting...", 4, 4);
 
-      // Submit
-      const submitBtn = page.locator('button:has-text("Insert"), button:has-text("Add"), button[type="submit"]').first();
-      await submitBtn.click({ timeout: 5000 });
+      // Submit - look in dialog context
+      const submitSelectors = [
+        '.cdk-overlay-pane button:has-text("Insert")',
+        '[role="dialog"] button:has-text("Insert")',
+        'button:has-text("Insert")',
+      ];
+
+      for (const sel of submitSelectors) {
+        try {
+          const btn = page.locator(sel).first();
+          if (await btn.isVisible({ timeout: 1500 })) {
+            await btn.click();
+            log.info(`  ✅ Clicked submit: ${sel}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
 
       await randomDelay(2000, 3000);
 
@@ -967,6 +1135,238 @@ export class BrowserSession {
 
     } catch (error) {
       log.error(`❌ [${this.sessionId}] Failed to add URL source via UI: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Add a YouTube source to the notebook via browser UI
+   *
+   * @param youtubeUrl - YouTube video URL
+   * @param sendProgress - Optional progress callback
+   * @returns true if source was added successfully
+   */
+  async addYouTubeSourceViaUI(
+    youtubeUrl: string,
+    sendProgress?: ProgressCallback
+  ): Promise<boolean> {
+    if (!this.page || !this.initialized) {
+      throw new Error("Session not initialized");
+    }
+
+    log.info(`🎥 [${this.sessionId}] Adding YouTube source via UI: "${youtubeUrl}"`);
+
+    try {
+      const page = this.page;
+      await sendProgress?.("Opening source panel...", 1, 4);
+
+      // Click add source button
+      const addBtn = page.locator('button[aria-label*="Add source"], button[aria-label*="add source"]').first();
+      await addBtn.click({ timeout: 5000 });
+      await randomDelay(1000, 1500);
+
+      await sendProgress?.("Selecting Website/YouTube option...", 2, 4);
+
+      // Select Website option - opens "Website and YouTube URLs" dialog
+      const urlOptionSelectors = [
+        'button:has-text("Website")',
+        '[role="menuitem"]:has-text("Website")',
+        'button:has-text("Link")',
+        'button:has-text("URL")',
+        'button:has-text("YouTube")',
+        '[role="menuitem"]:has-text("YouTube")',
+      ];
+
+      let selected = false;
+      for (const sel of urlOptionSelectors) {
+        try {
+          const opt = page.locator(sel).first();
+          if (await opt.isVisible({ timeout: 2000 })) {
+            await opt.click();
+            log.info(`  ✅ Selected URL option: ${sel}`);
+            selected = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!selected) {
+        throw new Error("Could not find Website/YouTube source option");
+      }
+
+      await randomDelay(2000, 2500); // Wait for dialog to fully render
+      await sendProgress?.("Entering YouTube URL...", 3, 4);
+
+      // Fill URL textarea - NotebookLM uses textarea with "Paste any links" placeholder
+      const urlTextareaSelectors = [
+        'textarea[placeholder*="Paste any links"]',
+        'textarea[placeholder*="Paste"]',
+        'textarea[placeholder*="paste"]',
+        'textarea[placeholder*="link"]',
+        'textarea[placeholder*="URL"]',
+        '.cdk-overlay-pane textarea',
+        '[role="dialog"] textarea',
+      ];
+
+      let filled = false;
+      for (const sel of urlTextareaSelectors) {
+        try {
+          const textarea = page.locator(sel).first();
+          if (await textarea.isVisible({ timeout: 1500 })) {
+            await textarea.fill(youtubeUrl);
+            log.info(`  ✅ Filled YouTube URL: ${sel}`);
+            filled = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!filled) {
+        throw new Error("Could not find URL textarea");
+      }
+
+      await randomDelay(500, 1000);
+      await sendProgress?.("Submitting...", 4, 4);
+
+      // Submit - look in dialog context first
+      const submitSelectors = [
+        '.cdk-overlay-pane button:has-text("Insert")',
+        '.cdk-overlay-pane button:has-text("Add")',
+        '[role="dialog"] button:has-text("Insert")',
+        '[role="dialog"] button:has-text("Add")',
+        'button:has-text("Insert")',
+        'button:has-text("Add")',
+        'button[type="submit"]',
+      ];
+
+      let submitted = false;
+      for (const sel of submitSelectors) {
+        try {
+          const btn = page.locator(sel).first();
+          if (await btn.isVisible({ timeout: 1500 })) {
+            await btn.click();
+            log.info(`  ✅ Clicked submit: ${sel}`);
+            submitted = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!submitted) {
+        log.warning('  ⚠️  Submit button not found, dialog may have auto-submitted');
+      }
+
+      await randomDelay(3000, 4000); // YouTube processing takes longer
+
+      this.updateActivity();
+      log.success(`✅ [${this.sessionId}] YouTube source added via UI: "${youtubeUrl}"`);
+      return true;
+
+    } catch (error) {
+      log.error(`❌ [${this.sessionId}] Failed to add YouTube source via UI: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Search the web for new sources and add them to the notebook
+   *
+   * @param query - Search query
+   * @param sendProgress - Optional progress callback
+   * @returns true if search was submitted successfully
+   */
+  async searchWebForSourcesViaUI(
+    query: string,
+    sendProgress?: ProgressCallback
+  ): Promise<boolean> {
+    if (!this.page || !this.initialized) {
+      throw new Error("Session not initialized");
+    }
+
+    log.info(`🔍 [${this.sessionId}] Searching web for sources: "${query}"`);
+
+    try {
+      const page = this.page;
+      await sendProgress?.("Opening search panel...", 1, 3);
+
+      // Find the search input in the sources panel
+      const searchInputSelectors = [
+        'input[placeholder*="Search the web"]',
+        'input[placeholder*="Search"]',
+        'input[aria-label*="Search"]',
+        '.sources-panel input[type="text"]',
+      ];
+
+      let searchInput = null;
+      for (const sel of searchInputSelectors) {
+        try {
+          const input = page.locator(sel).first();
+          if (await input.isVisible({ timeout: 2000 })) {
+            searchInput = input;
+            log.info(`  ✅ Found search input: ${sel}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!searchInput) {
+        throw new Error("Could not find web search input");
+      }
+
+      await sendProgress?.("Entering search query...", 2, 3);
+
+      // Fill the search query
+      await searchInput.fill(query);
+      await randomDelay(500, 1000);
+
+      await sendProgress?.("Submitting search...", 3, 3);
+
+      // Click the submit button (arrow icon)
+      const submitSelectors = [
+        'button[aria-label*="Search"]',
+        'button[aria-label*="Submit"]',
+        'button:has(mat-icon:has-text("arrow_forward"))',
+        'button:has(span:has-text("arrow_forward"))',
+        '.sources-panel button[type="submit"]',
+      ];
+
+      let submitted = false;
+      for (const sel of submitSelectors) {
+        try {
+          const btn = page.locator(sel).first();
+          if (await btn.isVisible({ timeout: 1500 })) {
+            await btn.click();
+            log.info(`  ✅ Clicked search submit: ${sel}`);
+            submitted = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!submitted) {
+        // Try pressing Enter as fallback
+        await searchInput.press('Enter');
+        log.info(`  ✅ Pressed Enter to submit search`);
+      }
+
+      await randomDelay(3000, 5000); // Wait for search results
+
+      this.updateActivity();
+      log.success(`✅ [${this.sessionId}] Web search submitted: "${query}"`);
+      return true;
+
+    } catch (error) {
+      log.error(`❌ [${this.sessionId}] Failed to search web for sources: ${error}`);
       throw error;
     }
   }
