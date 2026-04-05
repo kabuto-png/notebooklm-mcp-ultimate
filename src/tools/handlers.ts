@@ -48,7 +48,7 @@ export class ToolHandlers {
     this.contentHandlers = createContentHandlers({ library });
     this.researchHandlers = createResearchHandlers({ library });
     this.studioHandlers = createStudioHandlers({ library });
-    this.sourceHandlers = createSourceHandlers({ library });
+    this.sourceHandlers = createSourceHandlers({ library, sessionManager });
     this.notebookCRUDHandlers = createNotebookCRUDHandlers({ library });
   }
 

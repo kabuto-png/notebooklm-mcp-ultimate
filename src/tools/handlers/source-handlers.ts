@@ -5,6 +5,7 @@
  */
 
 import type { NotebookLibrary } from '../../library/notebook-library.js';
+import type { SessionManager } from '../../session/session-manager.js';
 import type { ProgressCallback } from '../../types.js';
 import { log } from '../../utils/logger.js';
 import * as sourceOps from '../../operations/source-operations.js';
@@ -14,6 +15,7 @@ import * as sourceOps from '../../operations/source-operations.js';
  */
 export interface SourceHandlerDependencies {
     library: NotebookLibrary;
+    sessionManager?: SessionManager;
 }
 
 /**
@@ -25,7 +27,14 @@ export type SourceHandlers = ReturnType<typeof createSourceHandlers>;
  * Create source management handlers
  */
 export function createSourceHandlers(deps: SourceHandlerDependencies) {
-    const { library } = deps;
+    const { library, sessionManager } = deps;
+
+    /**
+     * Build notebook URL from ID
+     */
+    function buildNotebookUrl(notebookId: string): string {
+        return `https://notebooklm.google.com/notebook/${notebookId}`;
+    }
 
     /**
      * Get notebook ID, using active notebook if not specified
@@ -91,7 +100,32 @@ export function createSourceHandlers(deps: SourceHandlerDependencies) {
             await sendProgress(`🔗 Adding URL source: ${args.url}`);
         }
 
+        // Try API first
         const result = await sourceOps.addURLSource(notebookId, args.url);
+
+        // Fallback to browser if API fails and sessionManager available
+        if (!result.success && sessionManager) {
+            log.warning('⚠️  API failed, falling back to browser automation...');
+            if (sendProgress) {
+                await sendProgress('🔄 API failed, trying browser automation...');
+            }
+
+            try {
+                const notebookUrl = buildNotebookUrl(notebookId);
+                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+                const browserSuccess = await session.addURLSourceViaUI(args.url);
+
+                if (browserSuccess) {
+                    log.success('✅ URL source added via browser automation');
+                    if (sendProgress) {
+                        await sendProgress('✅ URL source added via browser');
+                    }
+                    return { success: true, notebookId, method: 'browser' };
+                }
+            } catch (browserError) {
+                log.error(`❌ Browser fallback failed: ${browserError}`);
+            }
+        }
 
         if (result.success && sendProgress) {
             await sendProgress('✅ URL source added successfully');
@@ -119,11 +153,36 @@ export function createSourceHandlers(deps: SourceHandlerDependencies) {
             await sendProgress(`📝 Adding text source: ${args.title}`);
         }
 
+        // Try API first
         const result = await sourceOps.addTextSource(
             notebookId,
             args.title,
             args.content
         );
+
+        // Fallback to browser if API fails and sessionManager available
+        if (!result.success && sessionManager) {
+            log.warning('⚠️  API failed, falling back to browser automation...');
+            if (sendProgress) {
+                await sendProgress('🔄 API failed, trying browser automation...');
+            }
+
+            try {
+                const notebookUrl = buildNotebookUrl(notebookId);
+                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+                const browserSuccess = await session.addTextSourceViaUI(args.title, args.content);
+
+                if (browserSuccess) {
+                    log.success('✅ Text source added via browser automation');
+                    if (sendProgress) {
+                        await sendProgress('✅ Text source added via browser');
+                    }
+                    return { success: true, notebookId, method: 'browser' };
+                }
+            } catch (browserError) {
+                log.error(`❌ Browser fallback failed: ${browserError}`);
+            }
+        }
 
         if (result.success && sendProgress) {
             await sendProgress('✅ Text source added successfully');

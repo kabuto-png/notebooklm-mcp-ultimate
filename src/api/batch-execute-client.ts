@@ -538,6 +538,15 @@ export class NotebookLMAPIClient extends BatchExecuteClient {
       return false;
     }
 
+    // Check actual RPC response
+    const rpcResponse = extractResponse(response, 'izAoDd');
+    if (!rpcResponse?.success) {
+      log.warning(`⚠️  Add URL source RPC failed: ${rpcResponse?.error || 'no response'}`);
+      return false;
+    }
+
+    log.info(`[addURLSource] RPC response data: ${JSON.stringify(rpcResponse.data)?.substring(0, 200)}`);
+
     return true;
   }
 
@@ -558,6 +567,16 @@ export class NotebookLMAPIClient extends BatchExecuteClient {
       return false;
     }
 
+    // Check actual RPC response for source add operation
+    const rpcResponse = extractResponse(response, 'izAoDd');
+    if (!rpcResponse?.success) {
+      log.warning(`⚠️  Add text source RPC failed: ${rpcResponse?.error || 'no response'}`);
+      return false;
+    }
+
+    // Log response data for debugging
+    log.info(`[addTextSource] RPC response data: ${JSON.stringify(rpcResponse.data)?.substring(0, 200)}`);
+
     return true;
   }
 
@@ -573,6 +592,15 @@ export class NotebookLMAPIClient extends BatchExecuteClient {
       log.warning(`⚠️  Failed to add YouTube source: ${response.error}`);
       return false;
     }
+
+    // Check actual RPC response
+    const rpcResponse = extractResponse(response, 'n8xVHd');
+    if (!rpcResponse?.success) {
+      log.warning(`⚠️  Add YouTube source RPC failed: ${rpcResponse?.error || 'no response'}`);
+      return false;
+    }
+
+    log.info(`[addYouTubeSource] RPC response data: ${JSON.stringify(rpcResponse.data)?.substring(0, 200)}`);
 
     return true;
   }

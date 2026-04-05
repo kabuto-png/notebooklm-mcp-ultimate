@@ -184,11 +184,14 @@ export class BrowserSession {
     } catch {
       // Fix 5: Try multiple locale-agnostic fallback selectors instead of German-only
       const fallbackSelectors = [
+        'textarea[placeholder*="Start typing"]',    // New NotebookLM UI
+        'textarea[placeholder*="type"]',            // Generic typing placeholder
         'textarea[aria-label*="query"]',           // English partial
         'textarea[aria-label*="question"]',         // English
         'textarea[aria-label*="Ask"]',              // English
         'textarea[aria-label="Feld für Anfragen"]', // German (original)
         'textarea[role="textbox"]',                 // Generic fallback
+        'div[contenteditable="true"]',              // Contenteditable input
       ];
 
       let found = false;
@@ -690,6 +693,360 @@ export class BrowserSession {
       }
       log.error(`❌ [${this.sessionId}] Failed to reset: ${msg}`);
       throw error;
+    }
+  }
+
+  /**
+   * Add a text source to the notebook via browser UI
+   *
+   * @param title - Title for the source
+   * @param content - Text content to add
+   * @param sendProgress - Optional progress callback
+   * @returns true if source was added successfully
+   */
+  async addTextSourceViaUI(
+    title: string,
+    content: string,
+    sendProgress?: ProgressCallback
+  ): Promise<boolean> {
+    if (!this.page || !this.initialized) {
+      throw new Error("Session not initialized");
+    }
+
+    log.info(`📝 [${this.sessionId}] Adding text source via UI: "${title}"`);
+
+    try {
+      const page = this.page;
+      await sendProgress?.("Opening source panel...", 1, 5);
+
+      // Click the "Add source" button (+ icon in sources panel)
+      // Selector: button with aria-label containing "Add source" or the + icon
+      const addSourceSelectors = [
+        'button[aria-label*="Add source"]',
+        'button[aria-label*="add source"]',
+        'button[aria-label*="Quelle hinzufügen"]', // German
+        '[data-tooltip*="Add source"]',
+        'button.add-source-button',
+        // Fallback: look for + icon button in sources area
+        '.sources-panel button[aria-label*="Add"]',
+      ];
+
+      let addButtonClicked = false;
+      for (const sel of addSourceSelectors) {
+        try {
+          const btn = page.locator(sel).first();
+          if (await btn.isVisible({ timeout: 2000 })) {
+            await btn.click();
+            addButtonClicked = true;
+            log.info(`  ✅ Clicked add source button: ${sel}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!addButtonClicked) {
+        // Try keyboard shortcut or alternative approach
+        log.warning("  ⚠️  Could not find add source button, trying alternative...");
+        // Some UIs use a menu - try clicking on Sources header
+        const sourcesHeader = page.locator('text="Sources"').first();
+        if (await sourcesHeader.isVisible({ timeout: 2000 })) {
+          await sourcesHeader.click();
+          await randomDelay(500, 1000);
+        }
+      }
+
+      await randomDelay(1000, 1500);
+      await sendProgress?.("Selecting text source option...", 2, 5);
+
+      // Select "Copied text" or "Paste text" option
+      const textOptionSelectors = [
+        'button:has-text("Copied text")',
+        'button:has-text("Paste text")',
+        'button:has-text("Text")',
+        '[role="menuitem"]:has-text("text")',
+        '[role="option"]:has-text("text")',
+        // German
+        'button:has-text("Eingefügter Text")',
+      ];
+
+      let textOptionClicked = false;
+      for (const sel of textOptionSelectors) {
+        try {
+          const opt = page.locator(sel).first();
+          if (await opt.isVisible({ timeout: 2000 })) {
+            await opt.click();
+            textOptionClicked = true;
+            log.info(`  ✅ Selected text source option: ${sel}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!textOptionClicked) {
+        throw new Error("Could not find text source option in menu");
+      }
+
+      await randomDelay(1000, 1500);
+      await sendProgress?.("Filling in source details...", 3, 5);
+
+      // Fill in the title field
+      const titleInputSelectors = [
+        'input[placeholder*="title"]',
+        'input[placeholder*="Title"]',
+        'input[aria-label*="title"]',
+        'input[aria-label*="Title"]',
+        'input[placeholder*="name"]',
+        // German
+        'input[placeholder*="Titel"]',
+        // Generic - first input in dialog
+        '[role="dialog"] input:first-of-type',
+      ];
+
+      for (const sel of titleInputSelectors) {
+        try {
+          const input = page.locator(sel).first();
+          if (await input.isVisible({ timeout: 2000 })) {
+            await input.fill(title);
+            log.info(`  ✅ Filled title: ${sel}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      // Fill in the content field (textarea)
+      const contentSelectors = [
+        'textarea[placeholder*="Paste"]',
+        'textarea[placeholder*="paste"]',
+        'textarea[placeholder*="content"]',
+        'textarea[aria-label*="content"]',
+        'textarea[aria-label*="text"]',
+        // German
+        'textarea[placeholder*="Einfügen"]',
+        // Generic - textarea in dialog
+        '[role="dialog"] textarea',
+      ];
+
+      for (const sel of contentSelectors) {
+        try {
+          const textarea = page.locator(sel).first();
+          if (await textarea.isVisible({ timeout: 2000 })) {
+            await textarea.fill(content);
+            log.info(`  ✅ Filled content: ${sel}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      await randomDelay(500, 1000);
+      await sendProgress?.("Submitting source...", 4, 5);
+
+      // Click submit/insert button
+      const submitSelectors = [
+        'button:has-text("Insert")',
+        'button:has-text("Add")',
+        'button:has-text("Save")',
+        'button:has-text("Submit")',
+        // German
+        'button:has-text("Einfügen")',
+        'button:has-text("Hinzufügen")',
+        // Generic primary button in dialog
+        '[role="dialog"] button[type="submit"]',
+        '[role="dialog"] button.primary',
+      ];
+
+      let submitted = false;
+      for (const sel of submitSelectors) {
+        try {
+          const btn = page.locator(sel).first();
+          if (await btn.isVisible({ timeout: 2000 })) {
+            await btn.click();
+            submitted = true;
+            log.info(`  ✅ Clicked submit: ${sel}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!submitted) {
+        throw new Error("Could not find submit button");
+      }
+
+      // Wait for source to be processed
+      await randomDelay(2000, 3000);
+      await sendProgress?.("Source added, waiting for processing...", 5, 5);
+
+      this.updateActivity();
+      log.success(`✅ [${this.sessionId}] Text source added via UI: "${title}"`);
+      return true;
+
+    } catch (error) {
+      log.error(`❌ [${this.sessionId}] Failed to add text source via UI: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Add a URL source to the notebook via browser UI
+   *
+   * @param url - URL to add as source
+   * @param sendProgress - Optional progress callback
+   * @returns true if source was added successfully
+   */
+  async addURLSourceViaUI(
+    url: string,
+    sendProgress?: ProgressCallback
+  ): Promise<boolean> {
+    if (!this.page || !this.initialized) {
+      throw new Error("Session not initialized");
+    }
+
+    log.info(`🔗 [${this.sessionId}] Adding URL source via UI: "${url}"`);
+
+    try {
+      const page = this.page;
+      await sendProgress?.("Opening source panel...", 1, 4);
+
+      // Click add source button
+      const addBtn = page.locator('button[aria-label*="Add source"], button[aria-label*="add source"]').first();
+      await addBtn.click({ timeout: 5000 });
+      await randomDelay(1000, 1500);
+
+      await sendProgress?.("Selecting website option...", 2, 4);
+
+      // Select website/URL option
+      const urlOptionSelectors = [
+        'button:has-text("Website")',
+        'button:has-text("URL")',
+        'button:has-text("Link")',
+        '[role="menuitem"]:has-text("Website")',
+        '[role="menuitem"]:has-text("URL")',
+      ];
+
+      for (const sel of urlOptionSelectors) {
+        try {
+          const opt = page.locator(sel).first();
+          if (await opt.isVisible({ timeout: 2000 })) {
+            await opt.click();
+            log.info(`  ✅ Selected URL option: ${sel}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      await randomDelay(1000, 1500);
+      await sendProgress?.("Entering URL...", 3, 4);
+
+      // Fill URL input
+      const urlInput = page.locator('input[type="url"], input[placeholder*="URL"], input[placeholder*="url"], input[placeholder*="http"]').first();
+      await urlInput.fill(url, { timeout: 5000 });
+
+      await randomDelay(500, 1000);
+      await sendProgress?.("Submitting...", 4, 4);
+
+      // Submit
+      const submitBtn = page.locator('button:has-text("Insert"), button:has-text("Add"), button[type="submit"]').first();
+      await submitBtn.click({ timeout: 5000 });
+
+      await randomDelay(2000, 3000);
+
+      this.updateActivity();
+      log.success(`✅ [${this.sessionId}] URL source added via UI: "${url}"`);
+      return true;
+
+    } catch (error) {
+      log.error(`❌ [${this.sessionId}] Failed to add URL source via UI: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * List sources in the notebook via browser UI
+   *
+   * @returns Array of source objects with title and id
+   */
+  async listSourcesViaUI(): Promise<Array<{ title: string; id?: string }>> {
+    if (!this.page || !this.initialized) {
+      throw new Error("Session not initialized");
+    }
+
+    log.info(`📚 [${this.sessionId}] Listing sources via UI...`);
+
+    try {
+      const page = this.page;
+
+      // Click on Sources tab first
+      const sourcesTab = page.locator('button:has-text("Sources"), [role="tab"]:has-text("Sources")').first();
+      if (await sourcesTab.isVisible({ timeout: 3000 })) {
+        await sourcesTab.click();
+        await randomDelay(1000, 1500);
+      }
+
+      // Find source items - they have checkboxes next to them
+      // Look for elements that are siblings of checkboxes in the source list
+      const sources: Array<{ title: string; id?: string }> = [];
+
+      // Strategy 1: Find labeled source items (checkbox + label)
+      const checkboxes = page.locator('input[type="checkbox"]');
+      const checkboxCount = await checkboxes.count();
+
+      for (let i = 0; i < checkboxCount; i++) {
+        const checkbox = checkboxes.nth(i);
+        // Get the parent container and find the label/text
+        const parent = checkbox.locator('xpath=ancestor::*[contains(@class, "source") or contains(@class, "item") or @role="listitem"]').first();
+        if (await parent.count() > 0) {
+          const text = await parent.textContent();
+          if (text && !text.includes('Select all')) {
+            sources.push({ title: text.trim() });
+          }
+        }
+      }
+
+      // If no sources found via checkboxes, try document icons
+      if (sources.length === 0) {
+        // Sources typically have document icons (description, article, insert_drive_file)
+        const docIcons = page.locator('[class*="source"] span, [aria-label*="source"]');
+        const iconCount = await docIcons.count();
+
+        for (let i = 0; i < iconCount; i++) {
+          const icon = docIcons.nth(i);
+          const parent = icon.locator('xpath=..').first();
+          const text = await parent.textContent();
+          if (text && text.length > 2 && text.length < 200) {
+            sources.push({ title: text.trim() });
+          }
+        }
+      }
+
+      // Deduplicate and filter out UI elements
+      const uiPatterns = [
+        /^add\s/i, /^languageWeb/i, /^search_spark/i, /^Fast Research/i,
+        /^arrow_/, /^Select all/i, /^more_vert/i, /keyboard_arrow/i,
+        /^description$/i, /^arrow_forward$/i, /^add$/i
+      ];
+      const uniqueSources = sources
+        .filter((s, i, arr) => arr.findIndex(x => x.title === s.title) === i)
+        .filter(s => !uiPatterns.some(p => p.test(s.title)))
+        .filter(s => s.title.length > 3); // Exclude very short icon-only text
+
+      log.success(`✅ [${this.sessionId}] Found ${uniqueSources.length} sources via UI`);
+      this.updateActivity();
+      return uniqueSources;
+
+    } catch (error) {
+      log.error(`❌ [${this.sessionId}] Failed to list sources via UI: ${error}`);
+      return [];
     }
   }
 
