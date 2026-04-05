@@ -12,7 +12,9 @@
     "dev": "tsx watch src/index.ts",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"No tests yet\" && exit 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "prepare": "npm run build",
     "discover-rpc": "tsx scripts/discover-rpc-ids.ts"
   },
@@ -52,10 +54,12 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^20.11.0",
+    "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^10.1.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
-    "typescript-eslint": "^8.57.2"
+    "typescript-eslint": "^8.57.2",
+    "vitest": "^4.1.2"
   },
   "engines": {
     "node": ">=18.0.0"
