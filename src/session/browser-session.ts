@@ -139,6 +139,8 @@ export class BrowserSession {
         const csrfToken = await extractCSRFFromPage(this.page);
         if (csrfToken) {
           csrfManager.setCachedToken(csrfToken);
+          // Also save CSRF to disk for cold-start API usage
+          await this.authManager.saveCSRFToken(csrfToken);
           log.success(`  🔑 CSRF token synced to API client`);
         }
       }

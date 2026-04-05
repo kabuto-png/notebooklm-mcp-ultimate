@@ -335,12 +335,12 @@ export class CookieStore {
 export const cookieStore = new CookieStore();
 
 /**
- * Initialize the API client with cookies from the store
+ * Initialize the API client with cookies and saved CSRF token
  *
  * @param client - The API client to initialize
  */
 export async function initializeAPIClientWithCookies(
-  client: { setCookies: (cookies: Cookie[]) => void }
+  client: { setCookies: (cookies: Cookie[]) => void; setCSRFToken?: (token: string) => void }
 ): Promise<boolean> {
   const allCookies = await cookieStore.loadCookies();
 
@@ -360,6 +360,21 @@ export async function initializeAPIClientWithCookies(
   );
 
   client.setCookies(cookies);
+
+  // Load and set saved CSRF token if available
+  if (client.setCSRFToken) {
+    try {
+      const { AuthManager } = await import('./auth-manager.js');
+      const authManager = new AuthManager();
+      const csrfToken = await authManager.loadSavedCSRFToken();
+      if (csrfToken) {
+        client.setCSRFToken(csrfToken);
+        log.success('✅ API client initialized with saved CSRF token');
+      }
+    } catch (error) {
+      log.dim(`ℹ️  Could not load saved CSRF token: ${error}`);
+    }
+  }
 
   const summary = await cookieStore.getAuthSummary();
   if (!summary.valid) {

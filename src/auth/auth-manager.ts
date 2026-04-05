@@ -24,6 +24,7 @@ import {
   realisticClick,
   randomMouseMovement,
 } from "../utils/stealth-utils.js";
+import { extractCSRFFromPage } from "../utils/page-utils.js";
 import type { ProgressCallback } from "../types.js";
 
 /**
@@ -44,10 +45,12 @@ const CRITICAL_COOKIE_NAMES = [
 export class AuthManager {
   private stateFilePath: string;
   private sessionFilePath: string;
+  private csrfFilePath: string;
 
   constructor() {
     this.stateFilePath = path.join(CONFIG.browserStateDir, "state.json");
     this.sessionFilePath = path.join(CONFIG.browserStateDir, "session.json");
+    this.csrfFilePath = path.join(CONFIG.browserStateDir, "csrf.json");
   }
 
   // ============================================================================
@@ -89,6 +92,21 @@ export class AuthManager {
         } catch (error) {
           log.warning(`⚠️  State saved, but sessionStorage failed: ${error}`);
         }
+
+        // Also save CSRF token for API client use
+        try {
+          const csrfToken = await extractCSRFFromPage(page);
+          if (csrfToken) {
+            await fs.writeFile(
+              this.csrfFilePath,
+              JSON.stringify({ token: csrfToken, savedAt: Date.now() }),
+              { encoding: "utf-8" }
+            );
+            log.success(`✅ CSRF token saved for API use`);
+          }
+        } catch (error) {
+          log.warning(`⚠️  CSRF token save failed: ${error}`);
+        }
       } else {
         log.success("✅ Browser state saved");
       }
@@ -97,6 +115,52 @@ export class AuthManager {
     } catch (error) {
       log.error(`❌ Failed to save browser state: ${error}`);
       return false;
+    }
+  }
+
+  /**
+   * Load saved CSRF token (for API client use without browser)
+   *
+   * @param maxAgeMs - Maximum age of saved token (default: 15 minutes)
+   * @returns CSRF token or null if not found/expired
+   */
+  async loadSavedCSRFToken(maxAgeMs = 15 * 60 * 1000): Promise<string | null> {
+    try {
+      if (!existsSync(this.csrfFilePath)) {
+        return null;
+      }
+
+      const data = await fs.readFile(this.csrfFilePath, { encoding: "utf-8" });
+      const { token, savedAt } = JSON.parse(data);
+
+      // Check if token is too old
+      if (Date.now() - savedAt > maxAgeMs) {
+        log.dim(`🔑 Saved CSRF token expired (age: ${Math.floor((Date.now() - savedAt) / 1000)}s)`);
+        return null;
+      }
+
+      log.dim(`🔑 Loaded saved CSRF token (age: ${Math.floor((Date.now() - savedAt) / 1000)}s)`);
+      return token;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Save CSRF token to disk (for cold-start API usage)
+   *
+   * @param token - CSRF token to save
+   */
+  async saveCSRFToken(token: string): Promise<void> {
+    try {
+      await fs.writeFile(
+        this.csrfFilePath,
+        JSON.stringify({ token, savedAt: Date.now() }),
+        { encoding: "utf-8" }
+      );
+      log.dim(`🔑 CSRF token saved to disk`);
+    } catch (error) {
+      log.warning(`⚠️  Failed to save CSRF token: ${error}`);
     }
   }
 
