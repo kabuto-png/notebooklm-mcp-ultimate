@@ -1,6 +1,6 @@
 {
   "name": "notebooklm-mcp-ultimate",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Ultimate NotebookLM MCP with 44 tools: Q&A, content generation, audio studio, source management, and research",
   "type": "module",
   "bin": {
