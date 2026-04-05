@@ -143,6 +143,12 @@ Say in your chat (Claude/Codex):
 ```
 *A Chrome window opens → log in with Google*
 
+**Headless/CI/CD?** Copy `~/.local/share/notebooklm-mcp/browser_state/state.json` and set:
+```bash
+export GOOGLE_AUTH_COOKIES_PATH=/path/to/state.json
+```
+See [Headless Auth docs](docs/configuration.md#headless-auth-cicd--server-environments) for details.
+
 ### 3. Create your knowledge base
 Go to [notebooklm.google.com](https://notebooklm.google.com) → Create notebook → Upload your docs:
 - 📄 PDFs, Google Docs, markdown files

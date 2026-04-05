@@ -76,6 +76,10 @@ export interface Config {
   cleanupInstancesOnShutdown: boolean;
   instanceProfileTtlHours: number;
   instanceProfileMaxCount: number;
+
+  // Headless auth: cookie import for CI/CD environments
+  importCookiesJson: string; // JSON string of cookies array
+  importCookiesPath: string; // Path to cookies JSON file
 }
 
 /**
@@ -130,6 +134,10 @@ const DEFAULTS: Config = {
   cleanupInstancesOnShutdown: true,
   instanceProfileTtlHours: 72,
   instanceProfileMaxCount: 20,
+
+  // Headless auth: cookie import (empty = disabled)
+  importCookiesJson: "",
+  importCookiesPath: "",
 };
 
 
@@ -196,6 +204,9 @@ function applyEnvOverrides(config: Config): Config {
     cleanupInstancesOnShutdown: parseBoolean(process.env.NOTEBOOK_CLEANUP_ON_SHUTDOWN, config.cleanupInstancesOnShutdown),
     instanceProfileTtlHours: parseInteger(process.env.NOTEBOOK_INSTANCE_TTL_HOURS, config.instanceProfileTtlHours),
     instanceProfileMaxCount: parseInteger(process.env.NOTEBOOK_INSTANCE_MAX_COUNT, config.instanceProfileMaxCount),
+    // Headless auth: cookie import for CI/CD
+    importCookiesJson: process.env.GOOGLE_AUTH_COOKIES || config.importCookiesJson,
+    importCookiesPath: process.env.GOOGLE_AUTH_COOKIES_PATH || config.importCookiesPath,
   };
 }
 

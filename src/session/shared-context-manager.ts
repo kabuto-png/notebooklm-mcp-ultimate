@@ -132,6 +132,17 @@ export class SharedContextManager {
       }
     }
 
+    // Try importing cookies from environment (for CI/CD headless auth)
+    if (CONFIG.importCookiesJson || CONFIG.importCookiesPath) {
+      const imported = await this.authManager.importCookiesFromEnv(
+        CONFIG.importCookiesJson,
+        CONFIG.importCookiesPath
+      );
+      if (imported) {
+        log.success("  🔐 Cookies imported from environment - headless auth enabled");
+      }
+    }
+
     // Check for saved auth
     const statePath = await this.authManager.getValidStatePath();
 

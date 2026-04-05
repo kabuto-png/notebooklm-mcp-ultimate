@@ -654,9 +654,9 @@ class NotebookLMMCPServer {
  * Main entry point
  */
 async function main() {
-  // Handle CLI commands
+  // Handle CLI commands (config, auth)
   const args = process.argv.slice(2);
-  if (args.length > 0 && args[0] === "config") {
+  if (args.length > 0 && (args[0] === "config" || args[0] === "auth")) {
     const cli = new CliHandler();
     await cli.handleCommand(args);
     process.exit(0);

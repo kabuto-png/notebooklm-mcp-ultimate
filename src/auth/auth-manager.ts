@@ -278,6 +278,84 @@ export class AuthManager {
   }
 
   // ============================================================================
+  // Cookie Import (Headless Auth for CI/CD)
+  // ============================================================================
+
+  /**
+   * Import cookies from JSON string or file path
+   * Enables headless authentication for CI/CD environments
+   *
+   * @param cookiesJson - JSON string of cookies array (from GOOGLE_AUTH_COOKIES env)
+   * @param cookiesPath - Path to JSON file (from GOOGLE_AUTH_COOKIES_PATH env)
+   * @returns true if cookies were imported successfully
+   */
+  async importCookiesFromEnv(cookiesJson?: string, cookiesPath?: string): Promise<boolean> {
+    try {
+      let cookiesData: string | null = null;
+
+      // Priority: JSON string > file path
+      if (cookiesJson && cookiesJson.trim()) {
+        cookiesData = cookiesJson;
+        log.info("🔐 Importing cookies from GOOGLE_AUTH_COOKIES env var...");
+      } else if (cookiesPath && cookiesPath.trim()) {
+        try {
+          cookiesData = await fs.readFile(cookiesPath, { encoding: "utf-8" });
+          log.info(`🔐 Importing cookies from file: ${cookiesPath}`);
+        } catch (error) {
+          log.error(`❌ Failed to read cookies file: ${cookiesPath}`);
+          return false;
+        }
+      }
+
+      if (!cookiesData) {
+        return false; // No cookies to import
+      }
+
+      // Parse and validate cookies
+      const cookies = JSON.parse(cookiesData);
+      if (!Array.isArray(cookies)) {
+        log.error("❌ Invalid cookies format: expected array");
+        return false;
+      }
+
+      // Validate required cookie fields
+      const requiredFields = ["name", "value", "domain"];
+      for (const cookie of cookies) {
+        for (const field of requiredFields) {
+          if (!cookie[field]) {
+            log.error(`❌ Cookie missing required field: ${field}`);
+            return false;
+          }
+        }
+      }
+
+      // Check for critical Google cookies
+      const cookieNames = cookies.map((c: { name: string }) => c.name);
+      const hasCritical = CRITICAL_COOKIE_NAMES.some(name => cookieNames.includes(name));
+      if (!hasCritical) {
+        log.warning("⚠️  No critical Google auth cookies found (SID, HSID, etc.)");
+        log.warning("   Import may not work for authentication");
+      }
+
+      // Create state file with imported cookies (Playwright storage state format)
+      const storageState = {
+        cookies: cookies,
+        origins: []
+      };
+
+      await fs.writeFile(this.stateFilePath, JSON.stringify(storageState, null, 2), {
+        encoding: "utf-8"
+      });
+
+      log.success(`✅ Imported ${cookies.length} cookies to browser state`);
+      return true;
+    } catch (error) {
+      log.error(`❌ Failed to import cookies: ${error}`);
+      return false;
+    }
+  }
+
+  // ============================================================================
   // Interactive Login
   // ============================================================================
 
