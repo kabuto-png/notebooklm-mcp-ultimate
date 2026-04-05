@@ -21,13 +21,12 @@ async function main() {
   console.log(`Count: ${sourcesBefore.length}`);
   sourcesBefore.forEach(s => console.log(`  - ${s.title}`));
 
-  // Add text source via browser UI
-  console.log('\n=== Adding text source via Browser UI ===');
-  const title = `Browser Test ${Date.now()}`;
-  const content = 'This is a test source added via browser UI automation.';
+  // Add file source via browser UI
+  console.log('\n=== Adding file source via Browser UI ===');
+  const testPdfPath = '/tmp/test-notebooklm.pdf';
 
   try {
-    const added = await session.addTextSourceViaUI(title, content);
+    const added = await session.addFileSourceViaUI(testPdfPath);
     console.log(`Add result: ${added}`);
   } catch (err) {
     console.error('Failed to add source:', err);
