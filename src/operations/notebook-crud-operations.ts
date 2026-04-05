@@ -262,8 +262,15 @@ export async function addFileSource(
         log.info(`Uploading file to notebook ${notebookId}: ${path.basename(filePath)}`);
 
         // Launch browser with saved state
-        browser = await chromium.launch({ headless: true });
-        const context = await browser.newContext({ storageState: statePath });
+        const { CONFIG } = await import('../config.js');
+        browser = await chromium.launch({
+            headless: true,
+            args: [`--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`],
+        });
+        const context = await browser.newContext({
+            storageState: statePath,
+            viewport: CONFIG.viewport,
+        });
         const page = await context.newPage();
 
         // Navigate to notebook

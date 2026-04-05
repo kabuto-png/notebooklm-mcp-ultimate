@@ -465,6 +465,58 @@ async function extractLatestText(
 }
 
 // ============================================================================
+// CSRF Token Extraction
+// ============================================================================
+
+/**
+ * Extract CSRF token from browser page
+ *
+ * The token is embedded in the page as WIZ_global_data.SNlM0e.
+ * Using page.evaluate() ensures we get the token from the same session
+ * as our cookies, avoiding session mismatch issues.
+ *
+ * @param page - Browser page navigated to notebooklm.google.com
+ * @returns CSRF token or null if not found
+ */
+export async function extractCSRFFromPage(page: Page): Promise<string | null> {
+  try {
+    const token = await page.evaluate((): string | null => {
+      // @ts-expect-error - window exists in browser context
+      const wizData = window.WIZ_global_data;
+      if (wizData?.SNlM0e) {
+        return wizData.SNlM0e as string;
+      }
+
+      // Fallback: search in page HTML for the token pattern
+      // @ts-expect-error - document exists in browser context
+      const html = document.documentElement.innerHTML;
+      const patterns = [
+        /"SNlM0e"\s*:\s*"([^"]+)"/,
+        /SNlM0e\s*=\s*["']([^"']+)["']/,
+      ];
+
+      for (const pattern of patterns) {
+        const match = html.match(pattern);
+        if (match?.[1]) {
+          return match[1];
+        }
+      }
+
+      return null;
+    });
+
+    if (token) {
+      log.dim(`🔑 Extracted CSRF token from browser (${token.length} chars)`);
+    }
+
+    return token;
+  } catch (error) {
+    log.warning(`⚠️  Failed to extract CSRF from page: ${error}`);
+    return null;
+  }
+}
+
+// ============================================================================
 // Exports
 // ============================================================================
 
@@ -473,4 +525,5 @@ export default {
   snapshotAllResponses,
   countResponseElements,
   waitForLatestAnswer,
+  extractCSRFFromPage,
 };

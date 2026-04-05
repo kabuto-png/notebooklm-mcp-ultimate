@@ -181,6 +181,7 @@ export class SharedContextManager {
         "--disable-dev-shm-usage",
         "--no-first-run",
         "--no-default-browser-check",
+        `--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`,
       ],
     };
 
