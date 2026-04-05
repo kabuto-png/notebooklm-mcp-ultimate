@@ -72,7 +72,37 @@ export function createSourceHandlers(deps: SourceHandlerDependencies) {
             await sendProgress('📚 Listing sources...');
         }
 
+        // Try API first
         const result = await sourceOps.listSources(notebookId);
+
+        // Fallback to browser if API fails and sessionManager available
+        if (!result.success && sessionManager) {
+            log.warning('⚠️  API failed, falling back to browser automation...');
+            if (sendProgress) {
+                await sendProgress('🔄 API failed, trying browser automation...');
+            }
+
+            try {
+                const notebookUrl = buildNotebookUrl(notebookId);
+                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+                const sources = await session.listSourcesViaUI();
+
+                log.success(`✅ Found ${sources.length} sources via browser automation`);
+                if (sendProgress) {
+                    await sendProgress(`✅ Found ${sources.length} sources via browser`);
+                }
+                return {
+                    success: true,
+                    sources: sources.map(s => ({
+                        title: s.title,
+                        id: s.id,
+                    })),
+                    method: 'browser',
+                };
+            } catch (browserError) {
+                log.error(`❌ Browser fallback failed: ${browserError}`);
+            }
+        }
 
         if (result.success && sendProgress) {
             await sendProgress(`✅ Found ${result.sources?.length || 0} sources`);
