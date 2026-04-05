@@ -5,6 +5,7 @@
  */
 
 import type { NotebookLibrary } from '../../library/notebook-library.js';
+import type { SessionManager } from '../../session/session-manager.js';
 import type { ProgressCallback } from '../../types.js';
 import { log } from '../../utils/logger.js';
 import * as researchOps from '../../operations/research-operations.js';
@@ -14,6 +15,7 @@ import * as researchOps from '../../operations/research-operations.js';
  */
 export interface ResearchHandlerDependencies {
     library: NotebookLibrary;
+    sessionManager?: SessionManager;
 }
 
 /**
@@ -25,7 +27,14 @@ export type ResearchHandlers = ReturnType<typeof createResearchHandlers>;
  * Create research handlers
  */
 export function createResearchHandlers(deps: ResearchHandlerDependencies) {
-    const { library } = deps;
+    const { library, sessionManager } = deps;
+
+    /**
+     * Build notebook URL from ID
+     */
+    function buildNotebookUrl(notebookId: string): string {
+        return `https://notebooklm.google.com/notebook/${notebookId}`;
+    }
 
     /**
      * Get notebook ID, using active notebook if not specified
@@ -56,7 +65,37 @@ export function createResearchHandlers(deps: ResearchHandlerDependencies) {
         }
 
         const notebookId = resolveNotebookId(args.notebook_id);
+
+        // Try API first
         const result = await researchOps.discoverSources(args.topic, notebookId || undefined);
+
+        // Fallback to browser if API fails and sessionManager available
+        if (!result.success && sessionManager && notebookId) {
+            log.warning('⚠️  API failed, falling back to browser automation...');
+            if (sendProgress) {
+                await sendProgress('🔄 API failed, trying browser automation...');
+            }
+
+            try {
+                const notebookUrl = buildNotebookUrl(notebookId);
+                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+                const searchSuccess = await session.searchWebForSourcesViaUI(args.topic);
+
+                if (searchSuccess) {
+                    log.success('✅ Web search triggered via browser automation');
+                    if (sendProgress) {
+                        await sendProgress('✅ Web search triggered via browser');
+                    }
+                    return {
+                        success: true,
+                        message: `Web search for "${args.topic}" triggered in browser. Check the sources panel for results.`,
+                        method: 'browser',
+                    };
+                }
+            } catch (browserError) {
+                log.error(`❌ Browser fallback failed: ${browserError}`);
+            }
+        }
 
         if (result.success && sendProgress) {
             await sendProgress(`✅ Found ${result.suggestions?.length || 0} search queries`);

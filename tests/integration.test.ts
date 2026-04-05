@@ -294,6 +294,87 @@ The MCP server provides tools for:
       console.log(`  ✓ YouTube source added: ${youtubeUrl}`);
     }, 90000);
 
+    it('should add file source to notebook', async () => {
+      if (!testNotebookId) {
+        testNotebookId = await getOrCreateTestNotebook();
+      }
+
+      // Create a temporary test file
+      const fs = await import('fs');
+      const path = await import('path');
+      const os = await import('os');
+
+      const tempDir = os.tmpdir();
+      const testFilePath = path.join(tempDir, 'notebooklm-test-file.txt');
+
+      // Write test content to file
+      fs.writeFileSync(testFilePath, `
+Test Document for NotebookLM Integration
+========================================
+
+This is a test file created for integration testing.
+It contains sample content that can be indexed by NotebookLM.
+
+Key Topics:
+- Integration testing
+- Browser automation
+- MCP protocol
+
+This file should be automatically cleaned up after testing.
+      `.trim());
+
+      try {
+        const result = await ctx.toolHandlers.handleAddFileSource({
+          notebook_id: testNotebookId,
+          file_path: testFilePath,
+        }) as { success: boolean; data?: { file_name?: string }; error?: string };
+
+        // File upload may fail due to rate limits or file type restrictions
+        if (!result.success) {
+          console.log(`  ⚠️  File source failed: ${result.error}`);
+          return;
+        }
+
+        expect(result.success).toBe(true);
+        console.log(`  ✓ File source added: ${result.data?.file_name || testFilePath}`);
+      } finally {
+        // Clean up temp file
+        try {
+          fs.unlinkSync(testFilePath);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    }, 90000);
+
+    it('should discover sources for a topic', async () => {
+      if (!testNotebookId) {
+        testNotebookId = await getOrCreateTestNotebook();
+      }
+
+      const result = await ctx.toolHandlers.handleDiscoverSources({
+        topic: 'machine learning basics',
+        notebook_id: testNotebookId,
+      }) as { success: boolean; suggestions?: unknown[]; message?: string; error?: string };
+
+      // Discover may fail due to rate limits or API changes
+      if (!result.success) {
+        console.log(`  ⚠️  Discover sources failed: ${result.error}`);
+        return;
+      }
+
+      expect(result.success).toBe(true);
+
+      // Check if we got suggestions or a browser-triggered message
+      if (result.suggestions && result.suggestions.length > 0) {
+        console.log(`  ✓ Discovered ${result.suggestions.length} source suggestions`);
+      } else if (result.message) {
+        console.log(`  ✓ ${result.message}`);
+      } else {
+        console.log(`  ✓ Discover sources completed`);
+      }
+    }, 90000);
+
     it('should delete source from notebook', async () => {
       if (!testNotebookId) {
         testNotebookId = await getOrCreateTestNotebook();

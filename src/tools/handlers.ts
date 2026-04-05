@@ -46,10 +46,10 @@ export class ToolHandlers {
 
     // Initialize content, studio, source, and notebook CRUD handlers
     this.contentHandlers = createContentHandlers({ library });
-    this.researchHandlers = createResearchHandlers({ library });
+    this.researchHandlers = createResearchHandlers({ library, sessionManager });
     this.studioHandlers = createStudioHandlers({ library });
     this.sourceHandlers = createSourceHandlers({ library, sessionManager });
-    this.notebookCRUDHandlers = createNotebookCRUDHandlers({ library });
+    this.notebookCRUDHandlers = createNotebookCRUDHandlers({ library, sessionManager });
   }
 
   /**

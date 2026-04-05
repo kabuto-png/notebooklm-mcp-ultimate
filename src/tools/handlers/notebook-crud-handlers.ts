@@ -5,6 +5,7 @@
  */
 
 import type { NotebookLibrary } from '../../library/notebook-library.js';
+import type { SessionManager } from '../../session/session-manager.js';
 import type { ProgressCallback } from '../../types.js';
 import { log } from '../../utils/logger.js';
 import * as notebookOps from '../../operations/notebook-crud-operations.js';
@@ -14,6 +15,7 @@ import * as notebookOps from '../../operations/notebook-crud-operations.js';
  */
 export interface NotebookCRUDHandlerDependencies {
     library: NotebookLibrary;
+    sessionManager?: SessionManager;
 }
 
 /**
@@ -25,7 +27,14 @@ export type NotebookCRUDHandlers = ReturnType<typeof createNotebookCRUDHandlers>
  * Create notebook CRUD handlers
  */
 export function createNotebookCRUDHandlers(deps: NotebookCRUDHandlerDependencies) {
-    const { library } = deps;
+    const { library, sessionManager } = deps;
+
+    /**
+     * Build notebook URL from ID
+     */
+    function buildNotebookUrl(notebookId: string): string {
+        return `https://notebooklm.google.com/notebook/${notebookId}`;
+    }
 
     /**
      * Handle create_notebook_remote tool
@@ -135,7 +144,39 @@ export function createNotebookCRUDHandlers(deps: NotebookCRUDHandlerDependencies
             await sendProgress(`Uploading file: ${args.file_path}...`);
         }
 
+        // Try API first
         const result = await notebookOps.addFileSource(args.notebook_id, args.file_path);
+
+        // Fallback to browser if API fails and sessionManager available
+        if (!result.success && sessionManager) {
+            log.warning('⚠️  API failed, falling back to browser automation...');
+            if (sendProgress) {
+                await sendProgress('🔄 API failed, trying browser automation...');
+            }
+
+            try {
+                const notebookUrl = buildNotebookUrl(args.notebook_id);
+                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+                const browserSuccess = await session.addFileSourceViaUI(args.file_path);
+
+                if (browserSuccess) {
+                    log.success('✅ File source added via browser automation');
+                    if (sendProgress) {
+                        await sendProgress('✅ File uploaded via browser');
+                    }
+                    return {
+                        success: true,
+                        data: {
+                            notebook_id: args.notebook_id,
+                            file_name: args.file_path.split('/').pop() || args.file_path,
+                            message: 'File uploaded via browser automation',
+                        },
+                    };
+                }
+            } catch (browserError) {
+                log.error(`❌ Browser fallback failed: ${browserError}`);
+            }
+        }
 
         if (result.success && sendProgress) {
             await sendProgress(`File uploaded: ${result.title}`);
