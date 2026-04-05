@@ -301,7 +301,7 @@ export class AuthManager {
         try {
           cookiesData = await fs.readFile(cookiesPath, { encoding: "utf-8" });
           log.info(`🔐 Importing cookies from file: ${cookiesPath}`);
-        } catch (error) {
+        } catch {
           log.error(`❌ Failed to read cookies file: ${cookiesPath}`);
           return false;
         }
