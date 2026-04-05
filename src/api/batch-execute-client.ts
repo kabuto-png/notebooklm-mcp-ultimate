@@ -322,6 +322,21 @@ export class BatchExecuteClient {
   }
 
   /**
+   * Set CSRF token directly (from browser extraction)
+   *
+   * Use this when you have a browser page and can extract the token
+   * directly from the DOM, avoiding the session mismatch issue.
+   *
+   * @param token - The CSRF token value
+   */
+  setCSRFToken(token: string): void {
+    csrfManager.setCachedToken(token);
+    if (this.config.debug) {
+      log.dim(`🔑 Set CSRF token externally (${token.length} chars)`);
+    }
+  }
+
+  /**
    * Sleep for a specified duration
    */
   private sleep(ms: number): Promise<void> {

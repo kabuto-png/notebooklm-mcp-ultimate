@@ -20,7 +20,9 @@ import { humanType, randomDelay } from "../utils/stealth-utils.js";
 import {
   waitForLatestAnswer,
   snapshotAllResponses,
+  extractCSRFFromPage,
 } from "../utils/page-utils.js";
+import { csrfManager } from "../api/csrf-manager.js";
 import { CONFIG } from "../config.js";
 import { log } from "../utils/logger.js";
 import type { SessionInfo, ProgressCallback } from "../types.js";
@@ -130,6 +132,16 @@ export class BrowserSession {
       // Wait for NotebookLM interface to load
       log.info(`  ⏳ Waiting for NotebookLM interface...`);
       await this.waitForNotebookLMReady();
+
+      // Extract CSRF token from browser and set on API client
+      // This ensures API calls use the same session as the browser
+      if (this.page) {
+        const csrfToken = await extractCSRFFromPage(this.page);
+        if (csrfToken) {
+          csrfManager.setCachedToken(csrfToken);
+          log.success(`  🔑 CSRF token synced to API client`);
+        }
+      }
 
       this.initialized = true;
       this.updateActivity();
