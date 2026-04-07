@@ -70,12 +70,13 @@ export async function createNotebook(
         await randomDelay(1000, 2000);
 
         // Click "Create notebook" button (try multiple selectors)
+        // From screenshot: "+ Create new" button in header, or "Create new notebook" card
         const createSelectors = [
-            'button:has-text("Create notebook")',
-            'button:has-text("New notebook")',
-            'button:has-text("Create")',
-            '[aria-label*="Create"]',
-            '[aria-label*="New"]',
+            'button:has-text("Create new")',           // Header button
+            '[aria-label*="Create new"]',              // Aria label match
+            ':has-text("Create new notebook")',        // Card in Recent section
+            'button:has-text("Create")',               // Fallback
+            '[aria-label*="Create"]',                  // Generic aria
         ];
 
         let clicked = false;
