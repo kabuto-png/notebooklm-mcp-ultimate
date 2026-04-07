@@ -1,19 +1,14 @@
 /**
  * Notebook CRUD Operations for NotebookLM
  *
- * Provides high-level operations for creating and renaming notebooks
- * directly via the NotebookLM API (not browser automation).
- *
- * Supported operations:
- * - Create notebook
- * - Rename notebook (remote)
+ * Browser-only implementations for creating, renaming, and deleting notebooks.
+ * No API client - all operations via Playwright browser automation.
  */
 
-import { getAPIClient, type NotebookLMAPIClient } from '../api/index.js';
-import { initializeAPIClientWithCookies } from '../auth/cookie-store.js';
-import { log } from '../utils/logger.js';
 import { chromium } from 'patchright';
 import { AuthManager } from '../auth/auth-manager.js';
+import { log } from '../utils/logger.js';
+import { randomDelay } from '../utils/stealth-utils.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -37,28 +32,7 @@ export interface NotebookCRUDResult {
 }
 
 /**
- * Get an initialized API client
- */
-async function getInitializedClient(): Promise<NotebookLMAPIClient | null> {
-    const client = getAPIClient();
-
-    // Check if already initialized
-    if (client.hasValidAuth()) {
-        return client;
-    }
-
-    // Try to initialize from cookie store
-    const success = await initializeAPIClientWithCookies(client);
-    if (!success) {
-        log.warning('API client not initialized. Please run setup_auth.');
-        return null;
-    }
-
-    return client;
-}
-
-/**
- * Create a new notebook in NotebookLM
+ * Create a new notebook in NotebookLM via browser
  *
  * @param title - Optional title for the notebook (defaults to "Untitled notebook")
  * @returns Result with notebook ID and URL
@@ -66,27 +40,105 @@ async function getInitializedClient(): Promise<NotebookLMAPIClient | null> {
 export async function createNotebook(
     title?: string
 ): Promise<NotebookCRUDResult> {
-    const client = await getInitializedClient();
-    if (!client) {
+    const authManager = new AuthManager();
+    const statePath = await authManager.getValidStatePath();
+
+    if (!statePath) {
         return {
             success: false,
-            error: 'API client not initialized. Please run setup_auth first.',
+            error: 'Not authenticated. Please run setup_auth first.',
         };
     }
 
+    let browser;
     try {
-        log.info(`Creating notebook${title ? `: ${title}` : ''}...`);
+        log.info(`Creating notebook via browser${title ? `: ${title}` : ''}...`);
 
-        const notebookId = await client.createNotebook(title);
+        const { CONFIG } = await import('../config.js');
+        browser = await chromium.launch({
+            headless: true,
+            args: [`--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`],
+        });
+        const context = await browser.newContext({
+            storageState: statePath,
+            viewport: CONFIG.viewport,
+        });
+        const page = await context.newPage();
 
-        if (!notebookId) {
-            return {
-                success: false,
-                error: 'Failed to create notebook - no ID returned',
-            };
+        // Navigate to NotebookLM home
+        await page.goto('https://notebooklm.google.com/', { waitUntil: 'networkidle', timeout: 30000 });
+        await randomDelay(1000, 2000);
+
+        // Click "Create notebook" button (try multiple selectors)
+        const createSelectors = [
+            'button:has-text("Create notebook")',
+            'button:has-text("New notebook")',
+            'button:has-text("Create")',
+            '[aria-label*="Create"]',
+            '[aria-label*="New"]',
+        ];
+
+        let clicked = false;
+        for (const sel of createSelectors) {
+            try {
+                const btn = page.locator(sel).first();
+                if (await btn.isVisible({ timeout: 2000 })) {
+                    await btn.click();
+                    clicked = true;
+                    log.info(`  ✅ Clicked: ${sel}`);
+                    break;
+                }
+            } catch {
+                continue;
+            }
         }
 
-        const url = `https://notebooklm.google.com/notebook/${notebookId}`;
+        if (!clicked) {
+            return { success: false, error: 'Could not find Create notebook button' };
+        }
+
+        // Wait for new notebook to load (URL changes to /notebook/{id})
+        await page.waitForURL(/\/notebook\/[a-f0-9-]+/, { timeout: 15000 });
+        await randomDelay(1000, 2000);
+
+        // Extract notebook ID from URL
+        const url = page.url();
+        const match = url.match(/\/notebook\/([a-f0-9-]+)/);
+        if (!match) {
+            return { success: false, error: 'Could not extract notebook ID from URL' };
+        }
+
+        const notebookId = match[1];
+
+        // If title provided, rename the notebook
+        if (title) {
+            // Click on the title to edit it
+            const titleSelectors = [
+                '[contenteditable="true"]',
+                '.notebook-title',
+                'h1[contenteditable]',
+                'input[aria-label*="title"]',
+            ];
+
+            for (const sel of titleSelectors) {
+                try {
+                    const titleEl = page.locator(sel).first();
+                    if (await titleEl.isVisible({ timeout: 2000 })) {
+                        await titleEl.click();
+                        await randomDelay(300, 500);
+                        // Select all and type new title
+                        await page.keyboard.press('Control+a');
+                        await page.keyboard.type(title, { delay: 50 });
+                        await page.keyboard.press('Enter');
+                        await randomDelay(500, 1000);
+                        log.info(`  ✅ Renamed to: ${title}`);
+                        break;
+                    }
+                } catch {
+                    continue;
+                }
+            }
+        }
 
         log.success(`Notebook created: ${notebookId}`);
 
@@ -101,11 +153,15 @@ export async function createNotebook(
             success: false,
             error: `Failed to create notebook: ${error}`,
         };
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
     }
 }
 
 /**
- * Rename a notebook in NotebookLM
+ * Rename a notebook in NotebookLM via browser
  *
  * @param notebookId - The notebook ID to rename
  * @param newTitle - The new title for the notebook
@@ -124,25 +180,110 @@ export async function renameNotebook(
         return { success: false, error: 'New title is required and must be non-empty', notebookId };
     }
 
-    const client = await getInitializedClient();
-    if (!client) {
+    const authManager = new AuthManager();
+    const statePath = await authManager.getValidStatePath();
+
+    if (!statePath) {
         return {
             success: false,
-            error: 'API client not initialized. Please run setup_auth first.',
+            error: 'Not authenticated. Please run setup_auth first.',
+            notebookId,
         };
     }
 
+    let browser;
     try {
-        log.info(`Renaming notebook ${notebookId} to "${newTitle}"...`);
+        log.info(`Renaming notebook ${notebookId} to "${newTitle}" via browser...`);
 
-        const success = await client.renameNotebook(notebookId, newTitle);
+        const { CONFIG } = await import('../config.js');
+        browser = await chromium.launch({
+            headless: true,
+            args: [`--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`],
+        });
+        const context = await browser.newContext({
+            storageState: statePath,
+            viewport: CONFIG.viewport,
+        });
+        const page = await context.newPage();
 
-        if (!success) {
-            return {
-                success: false,
-                error: 'Failed to rename notebook',
-                notebookId,
-            };
+        // Navigate to notebook
+        const notebookUrl = `https://notebooklm.google.com/notebook/${notebookId}`;
+        await page.goto(notebookUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        await randomDelay(1000, 2000);
+
+        // Click on the title to edit it (try multiple approaches)
+        const titleSelectors = [
+            'h1:has-text("Untitled")',
+            '.notebook-title',
+            '[contenteditable="true"]:near(header)',
+            'header [contenteditable]',
+        ];
+
+        let renamed = false;
+
+        // First try: click title directly
+        for (const sel of titleSelectors) {
+            try {
+                const titleEl = page.locator(sel).first();
+                if (await titleEl.isVisible({ timeout: 2000 })) {
+                    await titleEl.click();
+                    await randomDelay(300, 500);
+                    await page.keyboard.press('Control+a');
+                    await page.keyboard.type(newTitle, { delay: 30 });
+                    await page.keyboard.press('Enter');
+                    await randomDelay(500, 1000);
+                    renamed = true;
+                    break;
+                }
+            } catch {
+                continue;
+            }
+        }
+
+        // Second try: use settings/menu if direct edit not available
+        if (!renamed) {
+            // Click settings or more menu
+            const menuSelectors = [
+                'button[aria-label*="Settings"]',
+                'button[aria-label*="More"]',
+                'button:has-text("⋮")',
+                '[aria-label*="menu"]',
+            ];
+
+            for (const sel of menuSelectors) {
+                try {
+                    const menuBtn = page.locator(sel).first();
+                    if (await menuBtn.isVisible({ timeout: 2000 })) {
+                        await menuBtn.click();
+                        await randomDelay(500, 800);
+
+                        // Click rename option
+                        const renameBtn = page.locator('button:has-text("Rename"), [role="menuitem"]:has-text("Rename")').first();
+                        if (await renameBtn.isVisible({ timeout: 2000 })) {
+                            await renameBtn.click();
+                            await randomDelay(300, 500);
+
+                            // Type new name in dialog
+                            const input = page.locator('input[type="text"], input[aria-label*="name"]').first();
+                            await input.fill(newTitle);
+                            await randomDelay(200, 400);
+
+                            // Confirm
+                            const confirmBtn = page.locator('button:has-text("Save"), button:has-text("OK"), button:has-text("Rename")').first();
+                            await confirmBtn.click();
+                            await randomDelay(500, 1000);
+                            renamed = true;
+                            break;
+                        }
+                    }
+                } catch {
+                    continue;
+                }
+            }
+        }
+
+        if (!renamed) {
+            return { success: false, error: 'Could not find title element to rename', notebookId };
         }
 
         log.success(`Notebook renamed to: ${newTitle}`);
@@ -158,11 +299,15 @@ export async function renameNotebook(
             error: `Failed to rename notebook: ${error}`,
             notebookId,
         };
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
     }
 }
 
 /**
- * Delete a notebook in NotebookLM
+ * Delete a notebook in NotebookLM via browser
  *
  * @param notebookId - The notebook ID to delete
  * @returns Result indicating success or failure
@@ -175,25 +320,110 @@ export async function deleteNotebookRemote(
         return { success: false, error: idError, notebookId };
     }
 
-    const client = await getInitializedClient();
-    if (!client) {
+    const authManager = new AuthManager();
+    const statePath = await authManager.getValidStatePath();
+
+    if (!statePath) {
         return {
             success: false,
-            error: 'API client not initialized. Please run setup_auth first.',
+            error: 'Not authenticated. Please run setup_auth first.',
+            notebookId,
         };
     }
 
+    let browser;
     try {
-        log.info(`Deleting notebook ${notebookId}...`);
+        log.info(`Deleting notebook ${notebookId} via browser...`);
 
-        const success = await client.deleteNotebook(notebookId);
+        const { CONFIG } = await import('../config.js');
+        browser = await chromium.launch({
+            headless: true,
+            args: [`--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`],
+        });
+        const context = await browser.newContext({
+            storageState: statePath,
+            viewport: CONFIG.viewport,
+        });
+        const page = await context.newPage();
 
-        if (!success) {
-            return {
-                success: false,
-                error: 'Failed to delete notebook',
-                notebookId,
-            };
+        // Navigate to notebook
+        const notebookUrl = `https://notebooklm.google.com/notebook/${notebookId}`;
+        await page.goto(notebookUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        await randomDelay(1000, 2000);
+
+        // Click settings/more menu
+        const menuSelectors = [
+            'button[aria-label*="Settings"]',
+            'button[aria-label*="More"]',
+            'button:has-text("⋮")',
+            '[aria-label*="menu"]',
+            'button:has([data-icon="more_vert"])',
+        ];
+
+        let menuOpened = false;
+        for (const sel of menuSelectors) {
+            try {
+                const menuBtn = page.locator(sel).first();
+                if (await menuBtn.isVisible({ timeout: 2000 })) {
+                    await menuBtn.click();
+                    await randomDelay(500, 800);
+                    menuOpened = true;
+                    break;
+                }
+            } catch {
+                continue;
+            }
+        }
+
+        if (!menuOpened) {
+            return { success: false, error: 'Could not find settings/menu button', notebookId };
+        }
+
+        // Click delete option
+        const deleteSelectors = [
+            'button:has-text("Delete")',
+            '[role="menuitem"]:has-text("Delete")',
+            'button:has-text("Remove")',
+        ];
+
+        let deleteClicked = false;
+        for (const sel of deleteSelectors) {
+            try {
+                const deleteBtn = page.locator(sel).first();
+                if (await deleteBtn.isVisible({ timeout: 2000 })) {
+                    await deleteBtn.click();
+                    await randomDelay(500, 800);
+                    deleteClicked = true;
+                    break;
+                }
+            } catch {
+                continue;
+            }
+        }
+
+        if (!deleteClicked) {
+            return { success: false, error: 'Could not find delete option in menu', notebookId };
+        }
+
+        // Confirm deletion in dialog
+        const confirmSelectors = [
+            'button:has-text("Delete")',
+            'button:has-text("Confirm")',
+            'button:has-text("Yes")',
+            '.confirm-button',
+        ];
+
+        for (const sel of confirmSelectors) {
+            try {
+                const confirmBtn = page.locator(sel).first();
+                if (await confirmBtn.isVisible({ timeout: 3000 })) {
+                    await confirmBtn.click();
+                    await randomDelay(1000, 2000);
+                    break;
+                }
+            } catch {
+                continue;
+            }
         }
 
         log.success(`Notebook deleted: ${notebookId}`);
@@ -208,6 +438,10 @@ export async function deleteNotebookRemote(
             error: `Failed to delete notebook: ${error}`,
             notebookId,
         };
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
     }
 }
 
@@ -261,7 +495,6 @@ export async function addFileSource(
     try {
         log.info(`Uploading file to notebook ${notebookId}: ${path.basename(filePath)}`);
 
-        // Launch browser with saved state
         const { CONFIG } = await import('../config.js');
         browser = await chromium.launch({
             headless: true,

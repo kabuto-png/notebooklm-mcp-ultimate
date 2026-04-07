@@ -95,12 +95,13 @@ export class BrowserSession {
       // Navigate to notebook
       log.info(`  🌐 Navigating to: ${this.notebookUrl}`);
       await this.page.goto(this.notebookUrl, {
-        waitUntil: "domcontentloaded",
+        waitUntil: "networkidle",
         timeout: CONFIG.browserTimeout,
       });
 
-      // Wait for page to stabilize
-      await randomDelay(2000, 3000);
+      // Wait for Angular to finish rendering
+      await this.page.waitForLoadState('networkidle');
+      await randomDelay(1000, 2000);
 
       // Check if we need to login
       const isAuthenticated = await this.authManager.validateCookiesExpiry(
@@ -180,21 +181,20 @@ export class BrowserSession {
       // PRIMARY: Exact Python selector - textarea.query-box-input
       log.info("  ⏳ Waiting for chat input (textarea.query-box-input)...");
       await this.page.waitForSelector("textarea.query-box-input", {
-        timeout: 10000, // Python uses 10s timeout
+        timeout: 15000, // Extended for headless tests
         state: "visible", // ONLY check visibility (NO disabled check!)
       });
       log.success("  ✅ Chat input ready!");
     } catch {
       // Fix 5: Try multiple locale-agnostic fallback selectors instead of German-only
       const fallbackSelectors = [
-        'textarea[placeholder*="Start typing"]',    // New NotebookLM UI
-        'textarea[placeholder*="type"]',            // Generic typing placeholder
-        'textarea[aria-label*="query"]',           // English partial
+        'textarea[aria-label="Query box"]',         // Exact aria-label (verified)
+        'textarea[placeholder="Start typing..."]',  // Exact placeholder (verified)
+        'textarea[placeholder*="Start typing"]',    // Partial match
+        'textarea.mat-mdc-autocomplete-trigger',    // Material autocomplete
+        'textarea[aria-label*="query"]',            // English partial
         'textarea[aria-label*="question"]',         // English
-        'textarea[aria-label*="Ask"]',              // English
-        'textarea[aria-label="Feld für Anfragen"]', // German (original)
         'textarea[role="textbox"]',                 // Generic fallback
-        'div[contenteditable="true"]',              // Contenteditable input
       ];
 
       let found = false;

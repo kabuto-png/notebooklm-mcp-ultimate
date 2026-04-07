@@ -1,0 +1,115 @@
+# CLAUDE.md — NotebookLM MCP Ultimate
+
+## Project Context
+
+This is the **NotebookLM MCP Server** — a TypeScript MCP server (~15K LOC) providing 40 tools for AI-powered research and content generation via Google NotebookLM and Gemini 2.5. It uses hybrid browser automation + direct API execution with Patchright.
+
+- **Language:** TypeScript
+- **Framework:** `@modelcontextprotocol/sdk` + `patchright`
+- **Entry Point:** `src/index.ts` → compiled to `dist/index.js`
+- **Package Manager:** npm
+
+For detailed rules, see `.claude/rules/` directory.
+
+---
+
+## NotebookLM Usage Guide
+
+### When to Consult NotebookLM Before Implementing
+
+1. **Before implementing any new feature** — ask notebook for existing patterns, API contracts, and architectural decisions
+2. **When encountering unfamiliar Google API behavior** — ask notebook for known quirks, response formats, and edge cases
+3. **Before writing tests** — ask notebook for edge cases, error scenarios, and expected behaviors
+4. **When debugging** — ask notebook for known issues, error patterns, and past solutions
+5. **Before modifying browser automation** — ask notebook for selector changes, DOM patterns, and stealth considerations
+
+### How to Ask
+
+- Prefer **specific questions** over broad ones
+- Include context: file name, function name, error message
+- Ask one focused question per query for best results
+- Use `session_id` for multi-turn follow-ups
+
+### Notebook Library
+
+<!-- ADD YOUR NOTEBOOKS BELOW -->
+<!-- Format: [tag] notebook_id — Description -->
+<!-- [docs] NOTEBOOK_ID_HERE — Technical documentation and API reference -->
+<!-- [architecture] NOTEBOOK_ID_HERE — System architecture, patterns, and design decisions -->
+<!-- [google-api] NOTEBOOK_ID_HERE — Google batchexecute API format, response parsing, RPC IDs -->
+<!-- [browser-automation] NOTEBOOK_ID_HERE — Patchright/Playwright patterns, selectors, stealth techniques -->
+<!-- [troubleshooting] NOTEBOOK_ID_HERE — Known issues, error patterns, and solutions -->
+
+### When Claude Code Should Use NotebookLM
+
+- Before implementing any new MCP tool: ask for existing handler patterns
+- When adding new Google API RPC calls: ask for request/response format
+- Before modifying authentication flow: ask for cookie requirements and validation
+- When adding browser selectors: ask for current DOM structure
+- Before content parsing changes: ask for response format variations
+
+---
+
+## Troubleshooting
+
+### Authentication Issues
+
+**4-level recovery hierarchy:**
+1. **Auto CSRF refresh** — token auto-refreshes every 15 min
+2. **Cookie validation** — check expiry of critical cookies (SID, HSID, SSID, SAPISID, *PSID)
+3. **Saved state reload** — load from `browser_state/state.json` if <24h old
+4. **Manual re-auth** — use `setup_auth` tool to open browser for Google login
+
+**Common auth errors:**
+- `AuthenticationError` with `suggestCleanup: true` → run `cleanup_data` then `setup_auth`
+- Google challenge page → requires manual login, auto-login won't work
+- Rate limit (50/day for free) → switch accounts with `re_auth` tool
+
+### Session Issues
+
+- Sessions auto-cleanup after 15 min idle (`SESSION_TIMEOUT`)
+- Max 10 concurrent sessions (`MAX_SESSIONS`)
+- If browser context crashes, sessions auto-recover on next `ask()`
+- Profile lock errors → set `NOTEBOOK_PROFILE_STRATEGY=auto` for isolated instances
+
+### Rate Limits
+
+- Free accounts: 50 queries/day
+- Use `re_auth` to switch Google accounts when rate limited
+- Consider dedicated automation account (not primary)
+
+---
+
+## Cowork Automation
+
+See `/docs/cowork/` for task templates:
+- `research-before-code.md` — Query NotebookLM before implementing features
+- `notebook-sync.md` — Sync recent doc changes to notebooks
+- `debug-with-notebook.md` — Debug with NotebookLM knowledge base
+
+---
+
+## Tool Profiles
+
+- **minimal** (5 tools) — ask_question, list_notebooks, get_health, setup_auth, list_sessions
+- **standard** (10 tools) — adds content generation and source management
+- **full** (40 tools) — all tools including audio studio, research, CRUD
+
+Set profile: `npx notebooklm-mcp config set profile standard`
+
+---
+
+# CLAUDE.md
+
+This file provides guidance to Claude Code when working with this project.
+
+## Unclaude-Code Setup
+
+This project uses [unclaude-code](https://github.com/kabuto-png/unclaude-code) for AI-assisted development.
+
+- Skills: `.claude/skills/` — activate workflows via slash commands
+- Rules: `.claude/rules/` — always-on guidelines for Claude
+- Agents: `.claude/agents/` — specialized subagents for delegation
+- Commands: `.claude/commands/` — slash-invoked automation
+
+**Quick start:** Type `/uc-help` in Claude Code for a usage guide.
