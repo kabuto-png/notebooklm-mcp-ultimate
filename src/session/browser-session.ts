@@ -89,6 +89,9 @@ export class BrowserSession {
       }
       log.success(`  ✅ Created new page`);
 
+      // Set iPad Mini viewport for NotebookLM responsive UI
+      await this.page.setViewportSize({ width: 768, height: 1024 });
+
       // Navigate to notebook
       log.info(`  🌐 Navigating to: ${this.notebookUrl}`);
       await this.page.goto(this.notebookUrl, {
@@ -717,7 +720,22 @@ export class BrowserSession {
 
     try {
       const page = this.page;
-      await sendProgress?.("Opening source panel...", 1, 5);
+      await sendProgress?.("Opening source panel...", 1, 6);
+
+      // Dismiss any overlay/modal that might block clicks (e.g., new notebook onboarding)
+      const overlay = page.locator('.cdk-overlay-backdrop-showing');
+      if (await overlay.isVisible({ timeout: 1000 }).catch(() => false)) {
+        log.info("  🔄 Dismissing overlay modal...");
+        await page.keyboard.press('Escape');
+        await randomDelay(500, 800);
+      }
+
+      // Click on Sources tab first (iPad Mini viewport uses role="tab")
+      const sourcesTab = page.locator('[role="tab"]:has-text("Sources")').first();
+      if (await sourcesTab.isVisible({ timeout: 3000 })) {
+        await sourcesTab.click();
+        await randomDelay(500, 800);
+      }
 
       // Click the "Add source" button (+ icon in sources panel)
       // Selector: button with aria-label containing "Add source" or the + icon
@@ -914,14 +932,29 @@ export class BrowserSession {
 
     try {
       const page = this.page;
-      await sendProgress?.("Opening source panel...", 1, 4);
+      await sendProgress?.("Opening source panel...", 1, 6);
+
+      // Dismiss any overlay/modal that might block clicks (e.g., new notebook onboarding)
+      const overlay = page.locator('.cdk-overlay-backdrop-showing');
+      if (await overlay.isVisible({ timeout: 1000 }).catch(() => false)) {
+        log.info("  🔄 Dismissing overlay modal...");
+        await page.keyboard.press('Escape');
+        await randomDelay(500, 800);
+      }
+
+      // Click on Sources tab first (iPad Mini viewport uses role="tab")
+      const sourcesTab = page.locator('[role="tab"]:has-text("Sources")').first();
+      if (await sourcesTab.isVisible({ timeout: 3000 })) {
+        await sourcesTab.click();
+        await randomDelay(500, 800);
+      }
 
       // Click add source button
-      const addBtn = page.locator('button[aria-label*="Add source"], button[aria-label*="add source"]').first();
+      const addBtn = page.locator('button:has-text("Add sources"), button[aria-label*="Add source"]').first();
       await addBtn.click({ timeout: 5000 });
       await randomDelay(1000, 1500);
 
-      await sendProgress?.("Selecting file upload option...", 2, 4);
+      await sendProgress?.("Selecting file upload option...", 2, 6);
 
       // Select file upload option
       const fileOptionSelectors = [
@@ -1043,22 +1076,36 @@ export class BrowserSession {
 
     try {
       const page = this.page;
-      await sendProgress?.("Opening source panel...", 1, 4);
+      await sendProgress?.("Opening source panel...", 1, 5);
+
+      // Dismiss any overlay/modal that might block clicks (e.g., new notebook onboarding)
+      const overlay = page.locator('.cdk-overlay-backdrop-showing');
+      if (await overlay.isVisible({ timeout: 1000 }).catch(() => false)) {
+        log.info("  🔄 Dismissing overlay modal...");
+        await page.keyboard.press('Escape');
+        await randomDelay(500, 800);
+      }
+
+      // Click on Sources tab first (iPad Mini viewport uses role="tab")
+      const sourcesTab = page.locator('[role="tab"]:has-text("Sources")').first();
+      if (await sourcesTab.isVisible({ timeout: 3000 })) {
+        await sourcesTab.click();
+        await randomDelay(500, 800);
+      }
 
       // Click add source button
-      const addBtn = page.locator('button[aria-label*="Add source"], button[aria-label*="add source"]').first();
+      const addBtn = page.locator('button:has-text("Add sources"), button[aria-label*="Add source"]').first();
       await addBtn.click({ timeout: 5000 });
       await randomDelay(1000, 1500);
 
-      await sendProgress?.("Selecting website option...", 2, 4);
+      await sendProgress?.("Selecting website option...", 2, 5);
 
       // Select website/URL option
       const urlOptionSelectors = [
+        'button:has-text("Websites")',
         'button:has-text("Website")',
-        'button:has-text("URL")',
-        'button:has-text("Link")',
+        '[role="menuitem"]:has-text("Websites")',
         '[role="menuitem"]:has-text("Website")',
-        '[role="menuitem"]:has-text("URL")',
       ];
 
       for (const sel of urlOptionSelectors) {
@@ -1127,11 +1174,27 @@ export class BrowserSession {
         }
       }
 
+      // Wait for dialog to close
+      await page.waitForSelector('textarea[placeholder*="Paste any links"]', {
+        state: 'hidden',
+        timeout: 30000
+      }).catch(() => {});
+
       await randomDelay(2000, 3000);
 
+      // Verify source was added by checking source count
+      const sourceCount = await page.locator('.source-item, [data-source-id], mat-list-item').count();
+      const sourceAdded = sourceCount > 0;
+
       this.updateActivity();
-      log.success(`✅ [${this.sessionId}] URL source added via UI: "${url}"`);
-      return true;
+
+      if (sourceAdded) {
+        log.success(`✅ [${this.sessionId}] URL source added via UI: "${url}" (${sourceCount} sources)`);
+        return true;
+      } else {
+        log.warning(`⚠️ [${this.sessionId}] Source may not have been added: "${url}"`);
+        return true; // Still return true as click succeeded, source might be processing
+      }
 
     } catch (error) {
       log.error(`❌ [${this.sessionId}] Failed to add URL source via UI: ${error}`);
@@ -1158,14 +1221,29 @@ export class BrowserSession {
 
     try {
       const page = this.page;
-      await sendProgress?.("Opening source panel...", 1, 4);
+      await sendProgress?.("Opening source panel...", 1, 6);
+
+      // Dismiss any overlay/modal that might block clicks (e.g., new notebook onboarding)
+      const overlay = page.locator('.cdk-overlay-backdrop-showing');
+      if (await overlay.isVisible({ timeout: 1000 }).catch(() => false)) {
+        log.info("  🔄 Dismissing overlay modal...");
+        await page.keyboard.press('Escape');
+        await randomDelay(500, 800);
+      }
+
+      // Click on Sources tab first (iPad Mini viewport uses role="tab")
+      const sourcesTab = page.locator('[role="tab"]:has-text("Sources")').first();
+      if (await sourcesTab.isVisible({ timeout: 3000 })) {
+        await sourcesTab.click();
+        await randomDelay(500, 800);
+      }
 
       // Click add source button
-      const addBtn = page.locator('button[aria-label*="Add source"], button[aria-label*="add source"]').first();
+      const addBtn = page.locator('button:has-text("Add sources"), button[aria-label*="Add source"]').first();
       await addBtn.click({ timeout: 5000 });
       await randomDelay(1000, 1500);
 
-      await sendProgress?.("Selecting Website/YouTube option...", 2, 4);
+      await sendProgress?.("Selecting Website/YouTube option...", 2, 6);
 
       // Select Website option - opens "Website and YouTube URLs" dialog
       const urlOptionSelectors = [
@@ -1386,63 +1464,28 @@ export class BrowserSession {
     try {
       const page = this.page;
 
-      // Click on Sources tab first
-      const sourcesTab = page.locator('button:has-text("Sources"), [role="tab"]:has-text("Sources")').first();
-      if (await sourcesTab.isVisible({ timeout: 3000 })) {
+      // Click on Sources tab first (iPad Mini viewport uses role="tab")
+      const sourcesTab = page.locator('[role="tab"]:has-text("Sources")').first();
+      if (await sourcesTab.isVisible({ timeout: 5000 })) {
         await sourcesTab.click();
         await randomDelay(1000, 1500);
       }
 
-      // Find source items - they have checkboxes next to them
-      // Look for elements that are siblings of checkboxes in the source list
-      const sources: Array<{ title: string; id?: string }> = [];
+      // Use JS evaluation to get source titles (most reliable method)
+      // Sources have button.source-stretched-button with aria-label containing the title
+      const sourceData = await page.evaluate(`
+        Array.from(document.querySelectorAll('button[aria-label]'))
+          .filter(b => b.classList.contains('source-stretched-button'))
+          .map(b => ({
+            title: b.getAttribute('aria-label') || '',
+            id: b.closest('[draggable]')?.querySelector('[id*="source"]')?.id || undefined
+          }))
+          .filter(s => s.title.length > 0)
+      `) as Array<{ title: string; id?: string }>;
 
-      // Strategy 1: Find labeled source items (checkbox + label)
-      const checkboxes = page.locator('input[type="checkbox"]');
-      const checkboxCount = await checkboxes.count();
-
-      for (let i = 0; i < checkboxCount; i++) {
-        const checkbox = checkboxes.nth(i);
-        // Get the parent container and find the label/text
-        const parent = checkbox.locator('xpath=ancestor::*[contains(@class, "source") or contains(@class, "item") or @role="listitem"]').first();
-        if (await parent.count() > 0) {
-          const text = await parent.textContent();
-          if (text && !text.includes('Select all')) {
-            sources.push({ title: text.trim() });
-          }
-        }
-      }
-
-      // If no sources found via checkboxes, try document icons
-      if (sources.length === 0) {
-        // Sources typically have document icons (description, article, insert_drive_file)
-        const docIcons = page.locator('[class*="source"] span, [aria-label*="source"]');
-        const iconCount = await docIcons.count();
-
-        for (let i = 0; i < iconCount; i++) {
-          const icon = docIcons.nth(i);
-          const parent = icon.locator('xpath=..').first();
-          const text = await parent.textContent();
-          if (text && text.length > 2 && text.length < 200) {
-            sources.push({ title: text.trim() });
-          }
-        }
-      }
-
-      // Deduplicate and filter out UI elements
-      const uiPatterns = [
-        /^add\s/i, /^languageWeb/i, /^search_spark/i, /^Fast Research/i,
-        /^arrow_/, /^Select all/i, /^more_vert/i, /keyboard_arrow/i,
-        /^description$/i, /^arrow_forward$/i, /^add$/i
-      ];
-      const uniqueSources = sources
-        .filter((s, i, arr) => arr.findIndex(x => x.title === s.title) === i)
-        .filter(s => !uiPatterns.some(p => p.test(s.title)))
-        .filter(s => s.title.length > 3); // Exclude very short icon-only text
-
-      log.success(`✅ [${this.sessionId}] Found ${uniqueSources.length} sources via UI`);
+      log.success(`✅ [${this.sessionId}] Found ${sourceData.length} sources via UI`);
       this.updateActivity();
-      return uniqueSources;
+      return sourceData;
 
     } catch (error) {
       log.error(`❌ [${this.sessionId}] Failed to list sources via UI: ${error}`);

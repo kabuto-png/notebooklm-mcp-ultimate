@@ -30,332 +30,288 @@ export function createSourceHandlers(deps: SourceHandlerDependencies) {
     const { library, sessionManager } = deps;
 
     /**
-     * Build notebook URL from ID
+     * Resolve notebook to its actual URL (browser needs full URL with UUID, not alias)
      */
-    function buildNotebookUrl(notebookId: string): string {
-        return `https://notebooklm.google.com/notebook/${notebookId}`;
-    }
-
-    /**
-     * Get notebook ID, using active notebook if not specified
-     */
-    function resolveNotebookId(notebookId?: string): string | null {
-        if (notebookId) {
-            return notebookId;
+    function resolveNotebookUrl(notebookId?: string): string | null {
+        // If UUID provided directly, build URL
+        if (notebookId && /^[a-f0-9-]{36}$/i.test(notebookId)) {
+            return `https://notebooklm.google.com/notebook/${notebookId}`;
         }
 
-        const activeNotebook = library.getActiveNotebook();
-        if (!activeNotebook) {
+        // Get notebook from library (by alias or active)
+        const notebook = notebookId
+            ? library.getNotebook(notebookId)
+            : library.getActiveNotebook();
+
+        if (!notebook) {
             log.warning('⚠️  No notebook specified and no active notebook selected');
             return null;
         }
 
-        return activeNotebook.id;
+        // Return stored URL (contains actual UUID)
+        return notebook.url;
     }
 
     /**
-     * Handle list_sources tool
+     * Get notebook alias for user-facing responses
+     */
+    function resolveNotebookAlias(notebookId?: string): string | null {
+        if (notebookId) {
+            const notebook = library.getNotebook(notebookId);
+            return notebook?.id || notebookId;
+        }
+        return library.getActiveNotebook()?.id || null;
+    }
+
+    /**
+     * Handle list_sources tool (browser-only)
      */
     async function handleListSources(
         args: { notebook_id?: string },
         sendProgress?: ProgressCallback
     ) {
-        const notebookId = resolveNotebookId(args.notebook_id);
-        if (!notebookId) {
+        const notebookUrl = resolveNotebookUrl(args.notebook_id);
+        const notebookAlias = resolveNotebookAlias(args.notebook_id);
+
+        if (!notebookUrl) {
             return {
                 success: false,
                 error: 'No notebook specified and no active notebook selected',
             };
         }
 
+        if (!sessionManager) {
+            return {
+                success: false,
+                error: 'Browser session manager not available',
+                notebookId: notebookAlias,
+            };
+        }
+
         if (sendProgress) {
-            await sendProgress('📚 Listing sources...');
+            await sendProgress('📚 Listing sources via browser...');
         }
 
-        // Try API first
-        const result = await sourceOps.listSources(notebookId);
+        try {
+            const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+            const sources = await session.listSourcesViaUI();
 
-        // Fallback to browser if API fails and sessionManager available
-        if (!result.success && sessionManager) {
-            log.warning('⚠️  API failed, falling back to browser automation...');
+            log.success(`✅ Found ${sources.length} sources via browser`);
             if (sendProgress) {
-                await sendProgress('🔄 API failed, trying browser automation...');
+                await sendProgress(`✅ Found ${sources.length} sources`);
             }
-
-            try {
-                const notebookUrl = buildNotebookUrl(notebookId);
-                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
-                const sources = await session.listSourcesViaUI();
-
-                log.success(`✅ Found ${sources.length} sources via browser automation`);
-                if (sendProgress) {
-                    await sendProgress(`✅ Found ${sources.length} sources via browser`);
-                }
-                return {
-                    success: true,
-                    sources: sources.map(s => ({
-                        title: s.title,
-                        id: s.id,
-                    })),
-                    method: 'browser',
-                };
-            } catch (browserError) {
-                log.error(`❌ Browser fallback failed: ${browserError}`);
-            }
+            return {
+                success: true,
+                sources: sources.map(s => ({ title: s.title, id: s.id })),
+                method: 'browser',
+                notebookId: notebookAlias,
+            };
+        } catch (error) {
+            log.error(`❌ Browser failed: ${error}`);
+            return {
+                success: false,
+                error: `Browser failed: ${error}`,
+                notebookId: notebookAlias,
+            };
         }
-
-        if (result.success && sendProgress) {
-            await sendProgress(`✅ Found ${result.sources?.length || 0} sources`);
-        }
-
-        return result;
     }
 
     /**
-     * Handle add_url_source tool
+     * Handle add_url_source tool (browser-only)
      */
     async function handleAddURLSource(
         args: { notebook_id?: string; url: string },
         sendProgress?: ProgressCallback
     ) {
-        const notebookId = resolveNotebookId(args.notebook_id);
-        if (!notebookId) {
+        const notebookUrl = resolveNotebookUrl(args.notebook_id);
+        const notebookAlias = resolveNotebookAlias(args.notebook_id);
+
+        if (!notebookUrl || !sessionManager) {
             return {
                 success: false,
-                error: 'No notebook specified and no active notebook selected',
+                error: !notebookUrl ? 'No notebook specified' : 'Browser session not available',
+                notebookId: notebookAlias,
             };
         }
 
-        if (sendProgress) {
-            await sendProgress(`🔗 Adding URL source: ${args.url}`);
-        }
+        if (sendProgress) await sendProgress(`🔗 Adding URL source: ${args.url}`);
 
-        // Try API first
-        const result = await sourceOps.addURLSource(notebookId, args.url);
+        try {
+            const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+            const success = await session.addURLSourceViaUI(args.url);
 
-        // Fallback to browser if API fails and sessionManager available
-        if (!result.success && sessionManager) {
-            log.warning('⚠️  API failed, falling back to browser automation...');
-            if (sendProgress) {
-                await sendProgress('🔄 API failed, trying browser automation...');
+            if (success) {
+                log.success('✅ URL source added via browser');
+                if (sendProgress) await sendProgress('✅ URL source added');
+                return { success: true, notebookId: notebookAlias, method: 'browser' };
             }
-
-            try {
-                const notebookUrl = buildNotebookUrl(notebookId);
-                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
-                const browserSuccess = await session.addURLSourceViaUI(args.url);
-
-                if (browserSuccess) {
-                    log.success('✅ URL source added via browser automation');
-                    if (sendProgress) {
-                        await sendProgress('✅ URL source added via browser');
-                    }
-                    return { success: true, notebookId, method: 'browser' };
-                }
-            } catch (browserError) {
-                log.error(`❌ Browser fallback failed: ${browserError}`);
-            }
+            return { success: false, error: 'Browser failed to add URL source', notebookId: notebookAlias };
+        } catch (error) {
+            log.error(`❌ Browser failed: ${error}`);
+            return { success: false, error: `Browser failed: ${error}`, notebookId: notebookAlias };
         }
-
-        if (result.success && sendProgress) {
-            await sendProgress('✅ URL source added successfully');
-        }
-
-        return result;
     }
 
     /**
-     * Handle add_text_source tool
+     * Handle add_text_source tool (browser-only)
      */
     async function handleAddTextSource(
         args: { notebook_id?: string; title: string; content: string },
         sendProgress?: ProgressCallback
     ) {
-        const notebookId = resolveNotebookId(args.notebook_id);
-        if (!notebookId) {
+        const notebookUrl = resolveNotebookUrl(args.notebook_id);
+        const notebookAlias = resolveNotebookAlias(args.notebook_id);
+
+        if (!notebookUrl || !sessionManager) {
             return {
                 success: false,
-                error: 'No notebook specified and no active notebook selected',
+                error: !notebookUrl ? 'No notebook specified' : 'Browser session not available',
+                notebookId: notebookAlias,
             };
         }
 
-        if (sendProgress) {
-            await sendProgress(`📝 Adding text source: ${args.title}`);
-        }
+        if (sendProgress) await sendProgress(`📝 Adding text source: ${args.title}`);
 
-        // Try API first
-        const result = await sourceOps.addTextSource(
-            notebookId,
-            args.title,
-            args.content
-        );
+        try {
+            const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+            const success = await session.addTextSourceViaUI(args.title, args.content);
 
-        // Fallback to browser if API fails and sessionManager available
-        if (!result.success && sessionManager) {
-            log.warning('⚠️  API failed, falling back to browser automation...');
-            if (sendProgress) {
-                await sendProgress('🔄 API failed, trying browser automation...');
+            if (success) {
+                log.success('✅ Text source added via browser');
+                if (sendProgress) await sendProgress('✅ Text source added');
+                return { success: true, notebookId: notebookAlias, method: 'browser' };
             }
-
-            try {
-                const notebookUrl = buildNotebookUrl(notebookId);
-                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
-                const browserSuccess = await session.addTextSourceViaUI(args.title, args.content);
-
-                if (browserSuccess) {
-                    log.success('✅ Text source added via browser automation');
-                    if (sendProgress) {
-                        await sendProgress('✅ Text source added via browser');
-                    }
-                    return { success: true, notebookId, method: 'browser' };
-                }
-            } catch (browserError) {
-                log.error(`❌ Browser fallback failed: ${browserError}`);
-            }
+            return { success: false, error: 'Browser failed to add text source', notebookId: notebookAlias };
+        } catch (error) {
+            log.error(`❌ Browser failed: ${error}`);
+            return { success: false, error: `Browser failed: ${error}`, notebookId: notebookAlias };
         }
-
-        if (result.success && sendProgress) {
-            await sendProgress('✅ Text source added successfully');
-        }
-
-        return result;
     }
 
     /**
-     * Handle add_youtube_source tool
+     * Handle add_youtube_source tool (browser-only)
      */
     async function handleAddYouTubeSource(
         args: { notebook_id?: string; youtube_url: string },
         sendProgress?: ProgressCallback
     ) {
-        const notebookId = resolveNotebookId(args.notebook_id);
-        if (!notebookId) {
+        const notebookUrl = resolveNotebookUrl(args.notebook_id);
+        const notebookAlias = resolveNotebookAlias(args.notebook_id);
+
+        if (!notebookUrl || !sessionManager) {
             return {
                 success: false,
-                error: 'No notebook specified and no active notebook selected',
+                error: !notebookUrl ? 'No notebook specified' : 'Browser session not available',
+                notebookId: notebookAlias,
             };
         }
 
-        if (sendProgress) {
-            await sendProgress(`🎥 Adding YouTube source: ${args.youtube_url}`);
-        }
+        if (sendProgress) await sendProgress(`🎥 Adding YouTube source: ${args.youtube_url}`);
 
-        // Try API first
-        const result = await sourceOps.addYouTubeSource(notebookId, args.youtube_url);
+        try {
+            const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+            const success = await session.addYouTubeSourceViaUI(args.youtube_url);
 
-        // Fallback to browser if API fails and sessionManager available
-        if (!result.success && sessionManager) {
-            log.warning('⚠️  API failed, falling back to browser automation...');
-            if (sendProgress) {
-                await sendProgress('🔄 API failed, trying browser automation...');
+            if (success) {
+                log.success('✅ YouTube source added via browser');
+                if (sendProgress) await sendProgress('✅ YouTube source added');
+                return { success: true, notebookId: notebookAlias, method: 'browser' };
             }
-
-            try {
-                const notebookUrl = buildNotebookUrl(notebookId);
-                const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
-                const browserSuccess = await session.addYouTubeSourceViaUI(args.youtube_url);
-
-                if (browserSuccess) {
-                    log.success('✅ YouTube source added via browser automation');
-                    if (sendProgress) {
-                        await sendProgress('✅ YouTube source added via browser');
-                    }
-                    return { success: true, notebookId, method: 'browser' };
-                }
-            } catch (browserError) {
-                log.error(`❌ Browser fallback failed: ${browserError}`);
-            }
+            return { success: false, error: 'Browser failed to add YouTube source', notebookId: notebookAlias };
+        } catch (error) {
+            log.error(`❌ Browser failed: ${error}`);
+            return { success: false, error: `Browser failed: ${error}`, notebookId: notebookAlias };
         }
-
-        if (result.success && sendProgress) {
-            await sendProgress('✅ YouTube source added successfully');
-        }
-
-        return result;
     }
 
     /**
-     * Handle add_drive_source tool
+     * Handle add_drive_source tool (API-only, no browser equivalent yet)
      */
     async function handleAddDriveSource(
         args: { notebook_id?: string; file_id: string },
         sendProgress?: ProgressCallback
     ) {
-        const notebookId = resolveNotebookId(args.notebook_id);
-        if (!notebookId) {
-            return {
-                success: false,
-                error: 'No notebook specified and no active notebook selected',
-            };
+        const notebookAlias = resolveNotebookAlias(args.notebook_id);
+        // Drive source requires file picker - keep API for now
+        // TODO: Implement browser-based Drive file picker if needed
+
+        if (sendProgress) await sendProgress(`📁 Adding Google Drive source: ${args.file_id}`);
+
+        // Extract UUID from library for API call
+        const notebook = args.notebook_id
+            ? library.getNotebook(args.notebook_id)
+            : library.getActiveNotebook();
+
+        if (!notebook?.url) {
+            return { success: false, error: 'No notebook specified', notebookId: notebookAlias };
         }
 
-        if (sendProgress) {
-            await sendProgress(`📁 Adding Google Drive source: ${args.file_id}`);
+        const uuidMatch = notebook.url.match(/\/notebook\/([a-f0-9-]+)/i);
+        if (!uuidMatch) {
+            return { success: false, error: 'Could not extract notebook UUID', notebookId: notebookAlias };
         }
 
-        const result = await sourceOps.addDriveSource(notebookId, args.file_id);
-
-        if (result.success && sendProgress) {
-            await sendProgress('✅ Google Drive source added successfully');
-        }
-
-        return result;
+        const result = await sourceOps.addDriveSource(uuidMatch[1], args.file_id);
+        if (result.success && sendProgress) await sendProgress('✅ Google Drive source added');
+        return { ...result, notebookId: notebookAlias };
     }
 
     /**
-     * Handle delete_source tool
+     * Handle delete_source tool (API-only for now)
      */
     async function handleDeleteSource(
         args: { notebook_id?: string; source_id: string },
         sendProgress?: ProgressCallback
     ) {
-        const notebookId = resolveNotebookId(args.notebook_id);
-        if (!notebookId) {
-            return {
-                success: false,
-                error: 'No notebook specified and no active notebook selected',
-            };
+        const notebookAlias = resolveNotebookAlias(args.notebook_id);
+        // TODO: Implement browser-based delete if needed
+
+        if (sendProgress) await sendProgress(`🗑️  Deleting source: ${args.source_id}`);
+
+        const notebook = args.notebook_id
+            ? library.getNotebook(args.notebook_id)
+            : library.getActiveNotebook();
+
+        if (!notebook?.url) {
+            return { success: false, error: 'No notebook specified', notebookId: notebookAlias };
         }
 
-        if (sendProgress) {
-            await sendProgress(`🗑️  Deleting source: ${args.source_id}`);
+        const uuidMatch = notebook.url.match(/\/notebook\/([a-f0-9-]+)/i);
+        if (!uuidMatch) {
+            return { success: false, error: 'Could not extract notebook UUID', notebookId: notebookAlias };
         }
 
-        const result = await sourceOps.deleteSource(notebookId, args.source_id);
-
-        if (result.success && sendProgress) {
-            await sendProgress('✅ Source deleted successfully');
-        }
-
-        return result;
+        const result = await sourceOps.deleteSource(uuidMatch[1], args.source_id);
+        if (result.success && sendProgress) await sendProgress('✅ Source deleted');
+        return { ...result, notebookId: notebookAlias };
     }
 
     /**
-     * Handle summarize_source tool
+     * Handle summarize_source tool (API-only)
      */
     async function handleSummarizeSource(
         args: { notebook_id?: string; source_id: string },
         sendProgress?: ProgressCallback
     ) {
-        const notebookId = resolveNotebookId(args.notebook_id);
-        if (!notebookId) {
-            return {
-                success: false,
-                error: 'No notebook specified and no active notebook selected',
-            };
+        const notebookAlias = resolveNotebookAlias(args.notebook_id);
+        const notebook = args.notebook_id
+            ? library.getNotebook(args.notebook_id)
+            : library.getActiveNotebook();
+
+        if (!notebook?.url) {
+            return { success: false, error: 'No notebook specified', notebookId: notebookAlias };
         }
 
-        if (sendProgress) {
-            await sendProgress(`📄 Getting source summary: ${args.source_id}`);
+        const uuidMatch = notebook.url.match(/\/notebook\/([a-f0-9-]+)/i);
+        if (!uuidMatch) {
+            return { success: false, error: 'Could not extract notebook UUID', notebookId: notebookAlias };
         }
 
-        const result = await sourceOps.summarizeSource(notebookId, args.source_id);
+        if (sendProgress) await sendProgress(`📄 Getting source summary: ${args.source_id}`);
 
-        if (result.success && sendProgress) {
-            await sendProgress('✅ Source summary retrieved');
-        }
-
-        return result;
+        const result = await sourceOps.summarizeSource(uuidMatch[1], args.source_id);
+        if (result.success && sendProgress) await sendProgress('✅ Source summary retrieved');
+        return { ...result, notebookId: notebookAlias };
     }
 
     return {
