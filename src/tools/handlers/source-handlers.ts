@@ -37,20 +37,62 @@ export function createSourceHandlers(deps: SourceHandlerDependencies) {
     }
 
     /**
-     * Get notebook ID, using active notebook if not specified
+     * UUID regex pattern (standard 8-4-4-4-12 format)
+     */
+    const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    /**
+     * Extract notebook UUID from URL
+     */
+    function extractUuidFromUrl(url: string): string | null {
+        const match = url.match(/\/notebook\/([0-9a-f-]{36})/i);
+        return match ? match[1] : null;
+    }
+
+    /**
+     * Get notebook UUID, resolving library aliases to actual UUIDs.
+     * If a library alias is passed, looks up the notebook and extracts UUID from URL.
      */
     function resolveNotebookId(notebookId?: string): string | null {
         if (notebookId) {
+            // Already a UUID — use directly
+            if (UUID_PATTERN.test(notebookId)) {
+                return notebookId;
+            }
+
+            // Library alias — resolve to UUID via library lookup
+            const notebook = library.getNotebook(notebookId);
+            if (notebook) {
+                const uuid = extractUuidFromUrl(notebook.url);
+                if (uuid) {
+                    log.info(`📚 Resolved alias "${notebookId}" → UUID ${uuid}`);
+                    return uuid;
+                }
+                log.warning(`⚠️  Notebook "${notebookId}" has invalid URL: ${notebook.url}`);
+                return null;
+            }
+
+            // Not a UUID and not found in library — treat as potential UUID anyway
+            // (allows forward-compatibility with new ID formats)
+            log.warning(`⚠️  "${notebookId}" is not a known alias, passing as-is`);
             return notebookId;
         }
 
+        // No ID provided — use active notebook
         const activeNotebook = library.getActiveNotebook();
         if (!activeNotebook) {
             log.warning('⚠️  No notebook specified and no active notebook selected');
             return null;
         }
 
-        return activeNotebook.id;
+        // Extract UUID from active notebook's URL
+        const uuid = extractUuidFromUrl(activeNotebook.url);
+        if (uuid) {
+            return uuid;
+        }
+
+        log.warning(`⚠️  Active notebook has invalid URL: ${activeNotebook.url}`);
+        return null;
     }
 
     /**
