@@ -1515,8 +1515,7 @@ export class BrowserSession {
         await randomDelay(1000, 1500);
       }
 
-      // Find and click the source checkbox (to select it)
-      // Sources have button.source-stretched-button with aria-label containing the title
+      // Find the source button by aria-label (title)
       const sourceButton = page.locator(`button.source-stretched-button[aria-label="${sourceTitle}"]`).first();
 
       if (!await sourceButton.isVisible({ timeout: 5000 })) {
@@ -1524,48 +1523,51 @@ export class BrowserSession {
         return false;
       }
 
-      // Get the parent draggable container and find the checkbox
+      // Find the more button (⋮) in the same source container
+      // IDs are like: source-item-more-button-{uuid}
       const sourceContainer = sourceButton.locator('xpath=ancestor::*[@draggable="true"]').first();
-      const checkbox = sourceContainer.locator('input[type="checkbox"], [role="checkbox"]').first();
+      const moreButton = sourceContainer.locator('[id^="source-item-more-button"], button[aria-label*="More"], button[aria-label*="more"], [aria-haspopup="menu"]').first();
 
-      if (await checkbox.isVisible({ timeout: 3000 })) {
-        await checkbox.click();
+      if (await moreButton.isVisible({ timeout: 3000 })) {
+        await moreButton.click();
+        log.info(`  ✅ Clicked more button for: ${sourceTitle}`);
         await randomDelay(500, 800);
       } else {
-        // Alternative: right-click on source for context menu
-        await sourceButton.click({ button: 'right' });
+        // Fallback: hover to reveal more button
+        await sourceButton.hover();
         await randomDelay(500, 800);
-      }
-
-      // Look for delete button/menu item
-      const deleteSelectors = [
-        'button:has-text("Delete")',
-        '[aria-label*="Delete"]',
-        '[role="menuitem"]:has-text("Delete")',
-        'button[aria-label*="delete" i]',
-      ];
-
-      for (const sel of deleteSelectors) {
-        const deleteBtn = page.locator(sel).first();
-        if (await deleteBtn.isVisible({ timeout: 2000 })) {
-          await deleteBtn.click();
+        const hoverMoreBtn = sourceContainer.locator('[id^="source-item-more-button"], button[aria-label*="More"]').first();
+        if (await hoverMoreBtn.isVisible({ timeout: 2000 })) {
+          await hoverMoreBtn.click();
           await randomDelay(500, 800);
-
-          // Confirm deletion if dialog appears
-          const confirmBtn = page.locator('button:has-text("Delete"), button:has-text("Confirm")').first();
-          if (await confirmBtn.isVisible({ timeout: 2000 })) {
-            await confirmBtn.click();
-            await randomDelay(1000, 1500);
-          }
-
-          log.success(`✅ [${this.sessionId}] Source deleted: ${sourceTitle}`);
-          if (sendProgress) await sendProgress(`✅ Source deleted: ${sourceTitle}`);
-          this.updateActivity();
-          return true;
+        } else {
+          log.error(`❌ [${this.sessionId}] More button not found`);
+          return false;
         }
       }
 
-      log.error(`❌ [${this.sessionId}] Delete button not found`);
+      // Click "Delete" from the menu
+      const deleteMenuItem = page.locator('[role="menuitem"]:has-text("Delete"), button:has-text("Delete")').first();
+      if (await deleteMenuItem.isVisible({ timeout: 3000 })) {
+        await deleteMenuItem.click();
+        log.info(`  ✅ Clicked Delete menu item`);
+        await randomDelay(500, 800);
+
+        // Confirm deletion if dialog appears
+        const confirmBtn = page.locator('button:has-text("Delete"):not([role="menuitem"])').first();
+        if (await confirmBtn.isVisible({ timeout: 3000 })) {
+          await confirmBtn.click();
+          log.info(`  ✅ Confirmed deletion`);
+          await randomDelay(1000, 1500);
+        }
+
+        log.success(`✅ [${this.sessionId}] Source deleted: ${sourceTitle}`);
+        if (sendProgress) await sendProgress(`✅ Source deleted: ${sourceTitle}`);
+        this.updateActivity();
+        return true;
+      }
+
+      log.error(`❌ [${this.sessionId}] Delete menu item not found`);
       return false;
 
     } catch (error) {
