@@ -92,7 +92,7 @@ const DEFAULTS: Config = {
   // Browser Settings
   headless: true,
   browserTimeout: 30000,
-  viewport: { width: 1024, height: 768 },
+  viewport: { width: 768, height: 1024 }, // iPad Mini portrait
 
   // Session Management
   maxSessions: 10,

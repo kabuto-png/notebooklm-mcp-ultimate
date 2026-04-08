@@ -50,52 +50,65 @@ export async function createNotebook(
         };
     }
 
-    let browser;
+    let context: import('patchright').BrowserContext | null = null;
     try {
         log.info(`Creating notebook via browser${title ? `: ${title}` : ''}...`);
 
         const { CONFIG } = await import('../config.js');
-        browser = await chromium.launch({
+        // Use launchPersistentContext like session manager (preserves Google auth)
+        context = await chromium.launchPersistentContext(CONFIG.chromeProfileDir, {
             headless: true,
-            args: [`--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`],
-        });
-        const context = await browser.newContext({
-            storageState: statePath,
             viewport: CONFIG.viewport,
+            args: [
+                `--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`,
+                "--disable-blink-features=AutomationControlled",
+            ],
         });
         const page = await context.newPage();
 
         // Navigate to NotebookLM home
-        await page.goto('https://notebooklm.google.com/', { waitUntil: 'networkidle', timeout: 30000 });
-        await randomDelay(1000, 2000);
+        log.info('  🌐 Navigating to NotebookLM home...');
+        await page.goto('https://notebooklm.google.com/', { waitUntil: 'load', timeout: 30000 });
+        const currentUrl = page.url();
+        log.info(`  📍 Current URL: ${currentUrl}`);
 
-        // Click "Create notebook" button (try multiple selectors)
-        // From screenshot: "+ Create new" button in header, or "Create new notebook" card
-        const createSelectors = [
-            'button:has-text("Create new")',           // Header button
-            '[aria-label*="Create new"]',              // Aria label match
-            ':has-text("Create new notebook")',        // Card in Recent section
-            'button:has-text("Create")',               // Fallback
-            '[aria-label*="Create"]',                  // Generic aria
-        ];
-
-        let clicked = false;
-        for (const sel of createSelectors) {
-            try {
-                const btn = page.locator(sel).first();
-                if (await btn.isVisible({ timeout: 2000 })) {
-                    await btn.click();
-                    clicked = true;
-                    log.info(`  ✅ Clicked: ${sel}`);
-                    break;
-                }
-            } catch {
-                continue;
-            }
+        // Check if redirected to login
+        if (currentUrl.includes('accounts.google.com')) {
+            log.error('  ❌ Redirected to Google login - auth not working');
+            return { success: false, error: 'Not authenticated. Browser redirected to Google login.' };
         }
 
-        if (!clicked) {
-            return { success: false, error: 'Could not find Create notebook button' };
+        await randomDelay(3000, 4000); // Wait for Angular to render
+
+        // Wait for the create button to appear (most reliable selector)
+        const createBtn = page.locator('[aria-label="Create new notebook"]').first();
+        try {
+            log.info('  🔍 Looking for Create button...');
+            await createBtn.waitFor({ state: 'visible', timeout: 10000 });
+            await createBtn.click();
+            log.info('  ✅ Clicked: [aria-label="Create new notebook"]');
+        } catch {
+            // Fallback selectors
+            log.warning('  ⚠️ Primary selector failed, trying fallbacks...');
+            const fallbacks = ['button:has-text("Create new")', '[aria-label*="Create new"]'];
+            let clicked = false;
+            for (const sel of fallbacks) {
+                try {
+                    const btn = page.locator(sel).first();
+                    if (await btn.isVisible({ timeout: 3000 })) {
+                        await btn.click();
+                        clicked = true;
+                        log.info(`  ✅ Clicked: ${sel}`);
+                        break;
+                    }
+                } catch { continue; }
+            }
+            if (!clicked) {
+                // Log URL for debugging
+                const url = page.url();
+                log.error(`  ❌ Could not find Create button. URL: ${url}`);
+                return { success: false, error: `Could not find Create notebook button. Current URL: ${url}` };
+            }
         }
 
         // Wait for new notebook to load (URL changes to /notebook/{id})
@@ -155,8 +168,8 @@ export async function createNotebook(
             error: `Failed to create notebook: ${error}`,
         };
     } finally {
-        if (browser) {
-            await browser.close();
+        if (context) {
+            await context.close();
         }
     }
 }
@@ -192,94 +205,80 @@ export async function renameNotebook(
         };
     }
 
-    let browser;
+    let context: import('patchright').BrowserContext | null = null;
     try {
         log.info(`Renaming notebook ${notebookId} to "${newTitle}" via browser...`);
 
         const { CONFIG } = await import('../config.js');
-        browser = await chromium.launch({
+        context = await chromium.launchPersistentContext(CONFIG.chromeProfileDir, {
             headless: true,
-            args: [`--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`],
-        });
-        const context = await browser.newContext({
-            storageState: statePath,
             viewport: CONFIG.viewport,
+            args: [
+                `--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`,
+                "--disable-blink-features=AutomationControlled",
+            ],
         });
         const page = await context.newPage();
 
         // Navigate to notebook
         const notebookUrl = `https://notebooklm.google.com/notebook/${notebookId}`;
-        await page.goto(notebookUrl, { waitUntil: 'networkidle', timeout: 30000 });
-        await randomDelay(1000, 2000);
+        await page.goto(notebookUrl, { waitUntil: 'load', timeout: 30000 });
+        await randomDelay(2000, 3000);
 
-        // Click on the title to edit it (try multiple approaches)
-        const titleSelectors = [
-            'h1:has-text("Untitled")',
-            '.notebook-title',
-            '[contenteditable="true"]:near(header)',
-            'header [contenteditable]',
-        ];
-
+        // Find the notebook title input field
+        // NotebookLM's title input has NO type attribute (just <input> without type="text")
+        // The search input has type="text" and placeholder="Search"
         let renamed = false;
 
-        // First try: click title directly
-        for (const sel of titleSelectors) {
-            try {
-                const titleEl = page.locator(sel).first();
-                if (await titleEl.isVisible({ timeout: 2000 })) {
-                    await titleEl.click();
-                    await randomDelay(300, 500);
-                    await page.keyboard.press('Control+a');
-                    await page.keyboard.type(newTitle, { delay: 30 });
-                    await page.keyboard.press('Enter');
-                    await randomDelay(500, 1000);
-                    renamed = true;
-                    break;
-                }
-            } catch {
-                continue;
+        try {
+            // Primary selector: input without type attribute (excludes search which has type="text")
+            const titleInput = page.locator('input:not([type])').first();
+            if (await titleInput.isVisible({ timeout: 3000 })) {
+                const value = await titleInput.inputValue().catch(() => '');
+                log.info(`Found title input with value: "${value.substring(0, 50)}"`);
+
+                await titleInput.click();
+                await randomDelay(200, 400);
+                await titleInput.fill('');
+                await randomDelay(100, 200);
+                await titleInput.fill(newTitle);
+                await randomDelay(200, 400);
+                await page.keyboard.press('Tab'); // Blur to save
+                await randomDelay(500, 1000);
+                renamed = true;
             }
+        } catch {
+            // Primary approach failed
         }
 
-        // Second try: use settings/menu if direct edit not available
+        // Fallback: use Settings menu to rename
         if (!renamed) {
-            // Click settings or more menu
-            const menuSelectors = [
-                'button[aria-label*="Settings"]',
-                'button[aria-label*="More"]',
-                'button:has-text("⋮")',
-                '[aria-label*="menu"]',
-            ];
+            try {
+                const settingsBtn = page.locator('button[aria-label="Settings"]').first();
+                if (await settingsBtn.isVisible({ timeout: 2000 })) {
+                    await settingsBtn.click();
+                    await randomDelay(500, 800);
 
-            for (const sel of menuSelectors) {
-                try {
-                    const menuBtn = page.locator(sel).first();
-                    if (await menuBtn.isVisible({ timeout: 2000 })) {
-                        await menuBtn.click();
-                        await randomDelay(500, 800);
+                    // Look for rename option in the menu
+                    const renameBtn = page.locator('button:has-text("Rename"), [role="menuitem"]:has-text("Rename")').first();
+                    if (await renameBtn.isVisible({ timeout: 2000 })) {
+                        await renameBtn.click();
+                        await randomDelay(300, 500);
 
-                        // Click rename option
-                        const renameBtn = page.locator('button:has-text("Rename"), [role="menuitem"]:has-text("Rename")').first();
-                        if (await renameBtn.isVisible({ timeout: 2000 })) {
-                            await renameBtn.click();
-                            await randomDelay(300, 500);
+                        // Type new name in dialog input
+                        const dialogInput = page.locator('input[type="text"]').first();
+                        await dialogInput.fill(newTitle);
+                        await randomDelay(200, 400);
 
-                            // Type new name in dialog
-                            const input = page.locator('input[type="text"], input[aria-label*="name"]').first();
-                            await input.fill(newTitle);
-                            await randomDelay(200, 400);
-
-                            // Confirm
-                            const confirmBtn = page.locator('button:has-text("Save"), button:has-text("OK"), button:has-text("Rename")').first();
-                            await confirmBtn.click();
-                            await randomDelay(500, 1000);
-                            renamed = true;
-                            break;
-                        }
+                        // Confirm
+                        const confirmBtn = page.locator('button:has-text("Save"), button:has-text("OK"), button:has-text("Done")').first();
+                        await confirmBtn.click();
+                        await randomDelay(500, 1000);
+                        renamed = true;
                     }
-                } catch {
-                    continue;
                 }
+            } catch {
+                // Settings menu approach failed
             }
         }
 
@@ -301,8 +300,8 @@ export async function renameNotebook(
             notebookId,
         };
     } finally {
-        if (browser) {
-            await browser.close();
+        if (context) {
+            await context.close();
         }
     }
 }
@@ -332,99 +331,72 @@ export async function deleteNotebookRemote(
         };
     }
 
-    let browser;
+    let context: import('patchright').BrowserContext | null = null;
     try {
         log.info(`Deleting notebook ${notebookId} via browser...`);
 
         const { CONFIG } = await import('../config.js');
-        browser = await chromium.launch({
+        context = await chromium.launchPersistentContext(CONFIG.chromeProfileDir, {
             headless: true,
-            args: [`--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`],
-        });
-        const context = await browser.newContext({
-            storageState: statePath,
             viewport: CONFIG.viewport,
+            args: [
+                `--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`,
+                "--disable-blink-features=AutomationControlled",
+            ],
         });
         const page = await context.newPage();
 
-        // Navigate to notebook
-        const notebookUrl = `https://notebooklm.google.com/notebook/${notebookId}`;
-        await page.goto(notebookUrl, { waitUntil: 'networkidle', timeout: 30000 });
-        await randomDelay(1000, 2000);
+        // Navigate to home page (notebook list) - delete is available from card menu, not inside notebook
+        await page.goto('https://notebooklm.google.com/', { waitUntil: 'load', timeout: 30000 });
+        await randomDelay(2000, 3000);
 
-        // Click settings/more menu
-        const menuSelectors = [
-            'button[aria-label*="Settings"]',
-            'button[aria-label*="More"]',
-            'button:has-text("⋮")',
-            '[aria-label*="menu"]',
-            'button:has([data-icon="more_vert"])',
-        ];
-
-        let menuOpened = false;
-        for (const sel of menuSelectors) {
-            try {
-                const menuBtn = page.locator(sel).first();
-                if (await menuBtn.isVisible({ timeout: 2000 })) {
-                    await menuBtn.click();
-                    await randomDelay(500, 800);
-                    menuOpened = true;
-                    break;
-                }
-            } catch {
-                continue;
+        // Click "My notebooks" tab to ensure we're viewing our notebooks
+        try {
+            const myNotebooksTab = page.locator('button:has-text("My notebooks")').first();
+            if (await myNotebooksTab.isVisible({ timeout: 2000 })) {
+                await myNotebooksTab.click();
+                await randomDelay(1000, 2000);
             }
+        } catch {
+            // Tab might not be visible, continue anyway
         }
 
-        if (!menuOpened) {
-            return { success: false, error: 'Could not find settings/menu button', notebookId };
+        // Find the notebook card by looking for elements that reference the notebook ID
+        // NotebookLM uses aria-labelledby="project-{notebookId}-title" on the card's button
+        const cardButton = page.locator(`button[aria-labelledby*="${notebookId}"], [id*="${notebookId}"]`).first();
+        if (!await cardButton.isVisible({ timeout: 5000 })) {
+            return { success: false, error: 'Notebook not found on home page', notebookId };
         }
 
-        // Click delete option
-        const deleteSelectors = [
-            'button:has-text("Delete")',
-            '[role="menuitem"]:has-text("Delete")',
-            'button:has-text("Remove")',
-        ];
+        // Find the parent mat-card container and then the menu button within it
+        const card = cardButton.locator('xpath=ancestor::mat-card').first();
+        const menuBtn = card.locator('button[aria-label="Project Actions Menu"], button:has-text("more_vert")').first();
 
-        let deleteClicked = false;
-        for (const sel of deleteSelectors) {
-            try {
-                const deleteBtn = page.locator(sel).first();
-                if (await deleteBtn.isVisible({ timeout: 2000 })) {
-                    await deleteBtn.click();
-                    await randomDelay(500, 800);
-                    deleteClicked = true;
-                    break;
-                }
-            } catch {
-                continue;
-            }
+        if (!await menuBtn.isVisible({ timeout: 3000 })) {
+            return { success: false, error: 'Could not find menu button on notebook card', notebookId };
         }
 
-        if (!deleteClicked) {
+        await menuBtn.click();
+        await randomDelay(500, 800);
+
+        // Click delete option from the dropdown menu
+        const deleteBtn = page.locator('button:has-text("Delete"), [role="menuitem"]:has-text("Delete")').first();
+        if (!await deleteBtn.isVisible({ timeout: 2000 })) {
             return { success: false, error: 'Could not find delete option in menu', notebookId };
         }
 
-        // Confirm deletion in dialog
-        const confirmSelectors = [
-            'button:has-text("Delete")',
-            'button:has-text("Confirm")',
-            'button:has-text("Yes")',
-            '.confirm-button',
-        ];
+        await deleteBtn.click();
+        await randomDelay(500, 800);
 
-        for (const sel of confirmSelectors) {
-            try {
-                const confirmBtn = page.locator(sel).first();
-                if (await confirmBtn.isVisible({ timeout: 3000 })) {
-                    await confirmBtn.click();
-                    await randomDelay(1000, 2000);
-                    break;
-                }
-            } catch {
-                continue;
+        // Confirm deletion in dialog (if there is one)
+        try {
+            const confirmBtn = page.locator('button:has-text("Delete"):visible, button:has-text("Confirm"):visible').first();
+            if (await confirmBtn.isVisible({ timeout: 2000 })) {
+                await confirmBtn.click();
+                await randomDelay(1000, 2000);
             }
+        } catch {
+            // No confirmation dialog, deletion was immediate
         }
 
         log.success(`Notebook deleted: ${notebookId}`);
@@ -440,8 +412,8 @@ export async function deleteNotebookRemote(
             notebookId,
         };
     } finally {
-        if (browser) {
-            await browser.close();
+        if (context) {
+            await context.close();
         }
     }
 }
@@ -492,24 +464,24 @@ export async function addFileSource(
         };
     }
 
-    let browser;
+    let context: import('patchright').BrowserContext | null = null;
     try {
         log.info(`Uploading file to notebook ${notebookId}: ${path.basename(filePath)}`);
 
         const { CONFIG } = await import('../config.js');
-        browser = await chromium.launch({
+        context = await chromium.launchPersistentContext(CONFIG.chromeProfileDir, {
             headless: true,
-            args: [`--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`],
-        });
-        const context = await browser.newContext({
-            storageState: statePath,
             viewport: CONFIG.viewport,
+            args: [
+                `--window-size=${CONFIG.viewport.width},${CONFIG.viewport.height}`,
+                "--disable-blink-features=AutomationControlled",
+            ],
         });
         const page = await context.newPage();
 
         // Navigate to notebook
         const notebookUrl = `https://notebooklm.google.com/notebook/${notebookId}`;
-        await page.goto(notebookUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.goto(notebookUrl, { waitUntil: 'load', timeout: 30000 });
 
         // Click "Add sources" button
         await page.click('button:has-text("Add sources")', { timeout: 10000 });
@@ -539,8 +511,8 @@ export async function addFileSource(
             notebookId,
         };
     } finally {
-        if (browser) {
-            await browser.close();
+        if (context) {
+            await context.close();
         }
     }
 }

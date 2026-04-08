@@ -95,13 +95,13 @@ export class BrowserSession {
       // Navigate to notebook
       log.info(`  🌐 Navigating to: ${this.notebookUrl}`);
       await this.page.goto(this.notebookUrl, {
-        waitUntil: "networkidle",
+        waitUntil: "domcontentloaded",
         timeout: CONFIG.browserTimeout,
       });
 
-      // Wait for Angular to finish rendering
-      await this.page.waitForLoadState('networkidle');
-      await randomDelay(1000, 2000);
+      // Wait for Angular to finish rendering (use load instead of networkidle to avoid timeout)
+      await this.page.waitForLoadState('load').catch(() => {});
+      await randomDelay(2000, 3000);
 
       // Check if we need to login
       const isAuthenticated = await this.authManager.validateCookiesExpiry(
@@ -737,16 +737,13 @@ export class BrowserSession {
         await randomDelay(500, 800);
       }
 
-      // Click the "Add source" button (+ icon in sources panel)
-      // Selector: button with aria-label containing "Add source" or the + icon
+      // Click the "Add sources" button (found via debug: button:has-text("Add sources"))
       const addSourceSelectors = [
+        'button:has-text("Add sources")',           // Primary - found via debug
         'button[aria-label*="Add source"]',
         'button[aria-label*="add source"]',
-        'button[aria-label*="Quelle hinzufügen"]', // German
         '[data-tooltip*="Add source"]',
         'button.add-source-button',
-        // Fallback: look for + icon button in sources area
-        '.sources-panel button[aria-label*="Add"]',
       ];
 
       let addButtonClicked = false;
@@ -780,13 +777,11 @@ export class BrowserSession {
 
       // Select "Copied text" or "Paste text" option
       const textOptionSelectors = [
-        'button:has-text("Copied text")',
-        'button:has-text("Paste text")',
-        'button:has-text("Text")',
-        '[role="menuitem"]:has-text("text")',
-        '[role="option"]:has-text("text")',
-        // German
-        'button:has-text("Eingefügter Text")',
+        'button:has-text("Copied text")',           // Primary option
+        'button:has-text("Paste text")',            // Alternative
+        '[role="menuitem"]:has-text("Copied text")',
+        '[role="menuitem"]:has-text("Paste text")',
+        'button:has-text("Text")',                  // Generic fallback
       ];
 
       let textOptionClicked = false;
