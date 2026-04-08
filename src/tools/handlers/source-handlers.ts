@@ -264,26 +264,28 @@ export function createSourceHandlers(deps: SourceHandlerDependencies) {
         sendProgress?: ProgressCallback
     ) {
         const notebookAlias = resolveNotebookAlias(args.notebook_id);
-        // TODO: Implement browser-based delete if needed
 
         if (sendProgress) await sendProgress(`🗑️  Deleting source: ${args.source_id}`);
 
-        const notebook = args.notebook_id
-            ? library.getNotebook(args.notebook_id)
-            : library.getActiveNotebook();
-
-        if (!notebook?.url) {
-            return { success: false, error: 'No notebook specified', notebookId: notebookAlias };
+        // Handle UUID directly or lookup from library
+        let notebookUuid: string | undefined;
+        if (args.notebook_id?.match(/^[a-f0-9-]{36}$/i)) {
+            notebookUuid = args.notebook_id;
+        } else {
+            const notebook = args.notebook_id
+                ? library.getNotebook(args.notebook_id)
+                : library.getActiveNotebook();
+            const uuidMatch = notebook?.url?.match(/\/notebook\/([a-f0-9-]+)/i);
+            notebookUuid = uuidMatch?.[1];
         }
 
-        const uuidMatch = notebook.url.match(/\/notebook\/([a-f0-9-]+)/i);
-        if (!uuidMatch) {
-            return { success: false, error: 'Could not extract notebook UUID', notebookId: notebookAlias };
+        if (!notebookUuid) {
+            return { success: false, error: 'No notebook specified', notebookId: notebookAlias ?? undefined };
         }
 
-        const result = await sourceOps.deleteSource(uuidMatch[1], args.source_id);
+        const result = await sourceOps.deleteSource(notebookUuid, args.source_id);
         if (result.success && sendProgress) await sendProgress('✅ Source deleted');
-        return { ...result, notebookId: notebookAlias };
+        return { ...result, notebookId: notebookAlias ?? undefined };
     }
 
     /**
@@ -294,24 +296,28 @@ export function createSourceHandlers(deps: SourceHandlerDependencies) {
         sendProgress?: ProgressCallback
     ) {
         const notebookAlias = resolveNotebookAlias(args.notebook_id);
-        const notebook = args.notebook_id
-            ? library.getNotebook(args.notebook_id)
-            : library.getActiveNotebook();
 
-        if (!notebook?.url) {
-            return { success: false, error: 'No notebook specified', notebookId: notebookAlias };
+        // Handle UUID directly or lookup from library
+        let notebookUuid: string | undefined;
+        if (args.notebook_id?.match(/^[a-f0-9-]{36}$/i)) {
+            notebookUuid = args.notebook_id;
+        } else {
+            const notebook = args.notebook_id
+                ? library.getNotebook(args.notebook_id)
+                : library.getActiveNotebook();
+            const uuidMatch = notebook?.url?.match(/\/notebook\/([a-f0-9-]+)/i);
+            notebookUuid = uuidMatch?.[1];
         }
 
-        const uuidMatch = notebook.url.match(/\/notebook\/([a-f0-9-]+)/i);
-        if (!uuidMatch) {
-            return { success: false, error: 'Could not extract notebook UUID', notebookId: notebookAlias };
+        if (!notebookUuid) {
+            return { success: false, error: 'No notebook specified', notebookId: notebookAlias ?? undefined };
         }
 
         if (sendProgress) await sendProgress(`📄 Getting source summary: ${args.source_id}`);
 
-        const result = await sourceOps.summarizeSource(uuidMatch[1], args.source_id);
+        const result = await sourceOps.summarizeSource(notebookUuid, args.source_id);
         if (result.success && sendProgress) await sendProgress('✅ Source summary retrieved');
-        return { ...result, notebookId: notebookAlias };
+        return { ...result, notebookId: notebookAlias ?? undefined };
     }
 
     return {
