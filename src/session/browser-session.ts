@@ -1489,6 +1489,156 @@ export class BrowserSession {
   }
 
   /**
+   * Delete a source by title via browser UI
+   *
+   * @param sourceTitle - The title/name of the source to delete
+   * @param sendProgress - Optional progress callback
+   * @returns true if source was deleted successfully
+   */
+  async deleteSourceViaUI(
+    sourceTitle: string,
+    sendProgress?: ProgressCallback
+  ): Promise<boolean> {
+    if (!this.page || !this.initialized) {
+      throw new Error("Session not initialized");
+    }
+
+    log.info(`🗑️  [${this.sessionId}] Deleting source via UI: ${sourceTitle}`);
+
+    try {
+      const page = this.page;
+
+      // Click on Sources tab first
+      const sourcesTab = page.locator('[role="tab"]:has-text("Sources")').first();
+      if (await sourcesTab.isVisible({ timeout: 5000 })) {
+        await sourcesTab.click();
+        await randomDelay(1000, 1500);
+      }
+
+      // Find and click the source checkbox (to select it)
+      // Sources have button.source-stretched-button with aria-label containing the title
+      const sourceButton = page.locator(`button.source-stretched-button[aria-label="${sourceTitle}"]`).first();
+
+      if (!await sourceButton.isVisible({ timeout: 5000 })) {
+        log.error(`❌ [${this.sessionId}] Source not found: ${sourceTitle}`);
+        return false;
+      }
+
+      // Get the parent draggable container and find the checkbox
+      const sourceContainer = sourceButton.locator('xpath=ancestor::*[@draggable="true"]').first();
+      const checkbox = sourceContainer.locator('input[type="checkbox"], [role="checkbox"]').first();
+
+      if (await checkbox.isVisible({ timeout: 3000 })) {
+        await checkbox.click();
+        await randomDelay(500, 800);
+      } else {
+        // Alternative: right-click on source for context menu
+        await sourceButton.click({ button: 'right' });
+        await randomDelay(500, 800);
+      }
+
+      // Look for delete button/menu item
+      const deleteSelectors = [
+        'button:has-text("Delete")',
+        '[aria-label*="Delete"]',
+        '[role="menuitem"]:has-text("Delete")',
+        'button[aria-label*="delete" i]',
+      ];
+
+      for (const sel of deleteSelectors) {
+        const deleteBtn = page.locator(sel).first();
+        if (await deleteBtn.isVisible({ timeout: 2000 })) {
+          await deleteBtn.click();
+          await randomDelay(500, 800);
+
+          // Confirm deletion if dialog appears
+          const confirmBtn = page.locator('button:has-text("Delete"), button:has-text("Confirm")').first();
+          if (await confirmBtn.isVisible({ timeout: 2000 })) {
+            await confirmBtn.click();
+            await randomDelay(1000, 1500);
+          }
+
+          log.success(`✅ [${this.sessionId}] Source deleted: ${sourceTitle}`);
+          if (sendProgress) await sendProgress(`✅ Source deleted: ${sourceTitle}`);
+          this.updateActivity();
+          return true;
+        }
+      }
+
+      log.error(`❌ [${this.sessionId}] Delete button not found`);
+      return false;
+
+    } catch (error) {
+      log.error(`❌ [${this.sessionId}] Failed to delete source via UI: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * Get source details by clicking on it via browser UI
+   *
+   * @param sourceTitle - The title/name of the source
+   * @returns Source details object or null if not found
+   */
+  async getSourceDetailsViaUI(
+    sourceTitle: string
+  ): Promise<{ title: string; type?: string; addedDate?: string; summary?: string } | null> {
+    if (!this.page || !this.initialized) {
+      throw new Error("Session not initialized");
+    }
+
+    log.info(`📄 [${this.sessionId}] Getting source details via UI: ${sourceTitle}`);
+
+    try {
+      const page = this.page;
+
+      // Click on Sources tab first
+      const sourcesTab = page.locator('[role="tab"]:has-text("Sources")').first();
+      if (await sourcesTab.isVisible({ timeout: 5000 })) {
+        await sourcesTab.click();
+        await randomDelay(1000, 1500);
+      }
+
+      // Find and click the source to open details panel
+      const sourceButton = page.locator(`button.source-stretched-button[aria-label="${sourceTitle}"]`).first();
+
+      if (!await sourceButton.isVisible({ timeout: 5000 })) {
+        log.error(`❌ [${this.sessionId}] Source not found: ${sourceTitle}`);
+        return null;
+      }
+
+      await sourceButton.click();
+      await randomDelay(1500, 2000);
+
+      // Scrape details from the source panel
+      const details = await page.evaluate(`
+        (() => {
+          // Look for source detail panel elements
+          const titleEl = document.querySelector('[class*="source-title"], [class*="sourceTitle"], h2, h3');
+          const typeEl = document.querySelector('[class*="source-type"], [class*="sourceType"]');
+          const dateEl = document.querySelector('[class*="date"], time');
+          const summaryEl = document.querySelector('[class*="summary"], [class*="description"], p');
+
+          return {
+            title: titleEl?.textContent?.trim() || '${sourceTitle}',
+            type: typeEl?.textContent?.trim() || undefined,
+            addedDate: dateEl?.textContent?.trim() || undefined,
+            summary: summaryEl?.textContent?.trim() || undefined
+          };
+        })()
+      `);
+
+      log.success(`✅ [${this.sessionId}] Got source details: ${sourceTitle}`);
+      this.updateActivity();
+      return details as { title: string; type?: string; addedDate?: string; summary?: string };
+
+    } catch (error) {
+      log.error(`❌ [${this.sessionId}] Failed to get source details via UI: ${error}`);
+      return null;
+    }
+  }
+
+  /**
    * Close the session
    */
   async close(): Promise<void> {

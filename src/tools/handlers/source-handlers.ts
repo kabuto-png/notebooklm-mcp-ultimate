@@ -257,67 +257,107 @@ export function createSourceHandlers(deps: SourceHandlerDependencies) {
     }
 
     /**
-     * Handle delete_source tool (API-only for now)
+     * Handle delete_source tool (browser-only)
+     * @param args.source_id - Source title or ID to delete
      */
     async function handleDeleteSource(
         args: { notebook_id?: string; source_id: string },
         sendProgress?: ProgressCallback
     ) {
+        const notebookUrl = resolveNotebookUrl(args.notebook_id);
         const notebookAlias = resolveNotebookAlias(args.notebook_id);
+
+        if (!notebookUrl || !sessionManager) {
+            return {
+                success: false,
+                error: !notebookUrl ? 'No notebook specified' : 'Browser session not available',
+                notebookId: notebookAlias ?? undefined,
+            };
+        }
 
         if (sendProgress) await sendProgress(`🗑️  Deleting source: ${args.source_id}`);
 
-        // Handle UUID directly or lookup from library
-        let notebookUuid: string | undefined;
-        if (args.notebook_id?.match(/^[a-f0-9-]{36}$/i)) {
-            notebookUuid = args.notebook_id;
-        } else {
-            const notebook = args.notebook_id
-                ? library.getNotebook(args.notebook_id)
-                : library.getActiveNotebook();
-            const uuidMatch = notebook?.url?.match(/\/notebook\/([a-f0-9-]+)/i);
-            notebookUuid = uuidMatch?.[1];
-        }
+        try {
+            const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
 
-        if (!notebookUuid) {
-            return { success: false, error: 'No notebook specified', notebookId: notebookAlias ?? undefined };
-        }
+            // source_id can be title or ID - try direct match first
+            let sourceTitle = args.source_id;
 
-        const result = await sourceOps.deleteSource(notebookUuid, args.source_id);
-        if (result.success && sendProgress) await sendProgress('✅ Source deleted');
-        return { ...result, notebookId: notebookAlias ?? undefined };
+            // If it looks like an API source ID (sources/xxx), find the actual title
+            if (args.source_id.startsWith('sources/')) {
+                const sources = await session.listSourcesViaUI();
+                const match = sources.find(s => s.id?.includes(args.source_id.replace('sources/', '')));
+                if (match) {
+                    sourceTitle = match.title;
+                }
+            }
+
+            const success = await session.deleteSourceViaUI(sourceTitle, sendProgress);
+
+            if (success) {
+                log.success('✅ Source deleted via browser');
+                return { success: true, notebookId: notebookAlias ?? undefined, method: 'browser' };
+            }
+            return { success: false, error: 'Failed to delete source', notebookId: notebookAlias ?? undefined };
+        } catch (error) {
+            log.error(`❌ Browser failed: ${error}`);
+            return { success: false, error: `Browser failed: ${error}`, notebookId: notebookAlias ?? undefined };
+        }
     }
 
     /**
-     * Handle summarize_source tool (API-only)
+     * Handle summarize_source tool (browser-only)
+     * @param args.source_id - Source title or ID to get details for
      */
     async function handleSummarizeSource(
         args: { notebook_id?: string; source_id: string },
         sendProgress?: ProgressCallback
     ) {
+        const notebookUrl = resolveNotebookUrl(args.notebook_id);
         const notebookAlias = resolveNotebookAlias(args.notebook_id);
 
-        // Handle UUID directly or lookup from library
-        let notebookUuid: string | undefined;
-        if (args.notebook_id?.match(/^[a-f0-9-]{36}$/i)) {
-            notebookUuid = args.notebook_id;
-        } else {
-            const notebook = args.notebook_id
-                ? library.getNotebook(args.notebook_id)
-                : library.getActiveNotebook();
-            const uuidMatch = notebook?.url?.match(/\/notebook\/([a-f0-9-]+)/i);
-            notebookUuid = uuidMatch?.[1];
+        if (!notebookUrl || !sessionManager) {
+            return {
+                success: false,
+                error: !notebookUrl ? 'No notebook specified' : 'Browser session not available',
+                notebookId: notebookAlias ?? undefined,
+            };
         }
 
-        if (!notebookUuid) {
-            return { success: false, error: 'No notebook specified', notebookId: notebookAlias ?? undefined };
+        if (sendProgress) await sendProgress(`📄 Getting source details: ${args.source_id}`);
+
+        try {
+            const session = await sessionManager.getOrCreateSession(undefined, notebookUrl);
+
+            // source_id can be title or ID - try direct match first
+            let sourceTitle = args.source_id;
+
+            // If it looks like an API source ID (sources/xxx), find the actual title
+            if (args.source_id.startsWith('sources/')) {
+                const sources = await session.listSourcesViaUI();
+                const match = sources.find(s => s.id?.includes(args.source_id.replace('sources/', '')));
+                if (match) {
+                    sourceTitle = match.title;
+                }
+            }
+
+            const details = await session.getSourceDetailsViaUI(sourceTitle);
+
+            if (details) {
+                log.success('✅ Source details retrieved via browser');
+                if (sendProgress) await sendProgress('✅ Source details retrieved');
+                return {
+                    success: true,
+                    source: details,
+                    notebookId: notebookAlias ?? undefined,
+                    method: 'browser',
+                };
+            }
+            return { success: false, error: 'Source not found', notebookId: notebookAlias ?? undefined };
+        } catch (error) {
+            log.error(`❌ Browser failed: ${error}`);
+            return { success: false, error: `Browser failed: ${error}`, notebookId: notebookAlias ?? undefined };
         }
-
-        if (sendProgress) await sendProgress(`📄 Getting source summary: ${args.source_id}`);
-
-        const result = await sourceOps.summarizeSource(notebookUuid, args.source_id);
-        if (result.success && sendProgress) await sendProgress('✅ Source summary retrieved');
-        return { ...result, notebookId: notebookAlias ?? undefined };
     }
 
     return {
